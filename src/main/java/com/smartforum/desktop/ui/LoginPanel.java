@@ -6,7 +6,10 @@ import com.smartforum.desktop.auth.AuthService;
 import com.smartforum.desktop.ui.common.Theme;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 
 public class LoginPanel extends JPanel {
 
@@ -15,103 +18,195 @@ public class LoginPanel extends JPanel {
     private final JTextField emailField = new JTextField();
     private final JPasswordField passwordField = new JPasswordField();
     private final JLabel errorLabel = new JLabel(" ");
-    private final JButton loginBtn = new JButton("Login");
+    private final JButton loginBtn = new JButton("Log in");
+
+    // Colors matching Laravel UI
+    private static final Color DARK_SIDE_BG = new Color(20, 32, 38);
+    private static final Color LIGHT_SIDE_BG = new Color(246, 245, 240);
+    private static final Color INPUT_BG = new Color(235, 242, 255);
+    private static final Color INPUT_BORDER = new Color(210, 222, 245);
+    private static final Color PRIMARY_GREEN = new Color(38, 106, 88);
+    private static final Color TEXT_MUTED = new Color(140, 150, 160);
 
     public LoginPanel(AppWindow app, AppContext ctx) {
         this.app = app;
         this.ctx = ctx;
-        setLayout(new GridBagLayout());
-        setOpaque(true);
-        setBackground(Theme.INK);
 
-        JPanel card = new JPanel(new GridBagLayout());
-        card.setBackground(Theme.PAPER);
-        card.setOpaque(true);
-        card.setBorder(BorderFactory.createEmptyBorder(45, 45, 45, 45));
-        card.setPreferredSize(new Dimension(460, 520));
+        // Split-screen Layout: Left Hero Banner | Right Login Form
+        setLayout(new GridLayout(1, 2));
 
-        GridBagConstraints gc = new GridBagConstraints();
-        gc.gridx = 0;
-        gc.gridy = 0;
-        gc.gridwidth = 2;
-        gc.weightx = 1.0;
-        gc.anchor = GridBagConstraints.WEST;
-        gc.fill = GridBagConstraints.HORIZONTAL;
+        // -----------------------------------------------------------------
+        // LEFT SIDE: Branding & Hero Panel
+        // -----------------------------------------------------------------
+        JPanel leftPanel = new JPanel();
+        leftPanel.setBackground(DARK_SIDE_BG);
+        leftPanel.setLayout(new BorderLayout());
+        leftPanel.setBorder(new EmptyBorder(40, 48, 40, 48));
 
-        JLabel title = new JLabel("Welcome back");
-        title.setFont(Theme.AUTH_TITLE_FONT);
-        title.setForeground(Theme.INK);
-        card.add(title, gc);
+        // Top Brand Header
+        JLabel brandLabel = new JLabel("🎓 SMART DISCUSSION FORUM");
+        brandLabel.setFont(new Font("SansSerif", Font.BOLD, 13));
+        brandLabel.setForeground(Color.WHITE);
 
-        gc.gridy++;
-        gc.insets = new Insets(6, 0, 0, 0);
+        // Center Hero Text Container
+        JPanel centerHero = new JPanel();
+        centerHero.setOpaque(false);
+        centerHero.setLayout(new BoxLayout(centerHero, BoxLayout.Y_AXIS));
+
+        // Shield / Security Badge Icon
+        JLabel shieldIcon = new JLabel("🛡") {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(255, 255, 255, 15));
+                g2.drawOval(0, 0, 44, 44);
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        shieldIcon.setFont(new Font("SansSerif", Font.PLAIN, 20));
+        shieldIcon.setForeground(new Color(212, 175, 55));
+        shieldIcon.setHorizontalAlignment(SwingConstants.CENTER);
+        shieldIcon.setPreferredSize(new Dimension(46, 46));
+        shieldIcon.setMaximumSize(new Dimension(46, 46));
+        shieldIcon.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel heroTitle = new JLabel("<html>Where the discussion<br>continues.</html>");
+        heroTitle.setFont(new Font("Serif", Font.PLAIN, 32));
+        heroTitle.setForeground(Color.WHITE);
+        heroTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel heroSubtitle = new JLabel("<html>Log in to reach your groups, follow topics, and keep up<br>with your quizzes and grades — all in one place.</html>");
+        heroSubtitle.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        heroSubtitle.setForeground(TEXT_MUTED);
+        heroSubtitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        centerHero.add(Box.createVerticalGlue());
+        centerHero.add(shieldIcon);
+        centerHero.add(Box.createVerticalStrut(24));
+        centerHero.add(heroTitle);
+        centerHero.add(Box.createVerticalStrut(16));
+        centerHero.add(heroSubtitle);
+        centerHero.add(Box.createVerticalGlue());
+
+        // Bottom Footer Tagline
+        JLabel footerLabel = new JLabel("<html>A discussion & learning space for students, lecturers, and<br>administrators.</html>");
+        footerLabel.setFont(new Font("SansSerif", Font.PLAIN, 11));
+        footerLabel.setForeground(TEXT_MUTED.darker());
+
+        leftPanel.add(brandLabel, BorderLayout.NORTH);
+        leftPanel.add(centerHero, BorderLayout.CENTER);
+        leftPanel.add(footerLabel, BorderLayout.SOUTH);
+
+        // -----------------------------------------------------------------
+        // RIGHT SIDE: Login Form Panel
+        // -----------------------------------------------------------------
+        JPanel rightPanel = new JPanel(new GridBagLayout());
+        rightPanel.setBackground(LIGHT_SIDE_BG);
+
+        JPanel formCard = new JPanel();
+        formCard.setOpaque(false);
+        formCard.setLayout(new BoxLayout(formCard, BoxLayout.Y_AXIS));
+        formCard.setPreferredSize(new Dimension(380, 480));
+
+        // Welcome Header
+        JLabel title = new JLabel("Welcome Back");
+        title.setFont(new Font("Serif", Font.PLAIN, 38));
+        title.setForeground(new Color(24, 30, 38));
+
         JLabel subtitle = new JLabel("Log in to your discussion forum account.");
-        subtitle.setFont(Theme.AUTH_SUBTITLE_FONT);
-        subtitle.setForeground(Theme.MUTED);
-        card.add(subtitle, gc);
+        subtitle.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        subtitle.setForeground(new Color(110, 118, 128));
 
-        errorLabel.setFont(Theme.BODY_FONT_BOLD.deriveFont(12f));
-        errorLabel.setForeground(Theme.WARN);
-        gc.gridy++;
-        gc.insets = new Insets(10, 0, 2, 0);
-        card.add(errorLabel, gc);
+        errorLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+        errorLabel.setForeground(new Color(200, 50, 50));
+        errorLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        emailField.setPreferredSize(new Dimension(emailField.getPreferredSize().width, 36));
-        passwordField.setPreferredSize(new Dimension(passwordField.getPreferredSize().width, 36));
-        emailField.setFont(Theme.BODY_FONT);
-        passwordField.setFont(Theme.BODY_FONT);
-
-        gc.insets = new Insets(10, 0, 4, 0);
-        gc.gridy++;
+        // Email Section
         JLabel emailLabel = new JLabel("Email");
-        emailLabel.setFont(Theme.FIELD_LABEL_FONT);
-        emailLabel.setForeground(Theme.MUTED.darker());
-        card.add(emailLabel, gc);
+        emailLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+        emailLabel.setForeground(new Color(60, 70, 80));
 
-        gc.gridy++;
-        card.add(emailField, gc);
+        JPanel emailContainer = createInputWrapper(emailField, "✉", null);
 
-        gc.gridy++;
-        gc.insets = new Insets(14, 0, 4, 0);
+        // Password Section
         JLabel passLabel = new JLabel("Password");
-        passLabel.setFont(Theme.FIELD_LABEL_FONT);
-        passLabel.setForeground(Theme.MUTED.darker());
-        card.add(passLabel, gc);
+        passLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+        passLabel.setForeground(new Color(60, 70, 80));
 
-        gc.gridy++;
-        card.add(passwordField, gc);
+        // Password Eye Toggle Icon
+        JLabel eyeIcon = new JLabel("👁");
+        eyeIcon.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        eyeIcon.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        eyeIcon.setForeground(TEXT_MUTED);
+        eyeIcon.addMouseListener(new MouseAdapter() {
+            private boolean showPass = false;
 
-        gc.gridy++;
-        gc.anchor = GridBagConstraints.CENTER;
-        gc.fill = GridBagConstraints.NONE;
-        gc.insets = new Insets(26, 0, 12, 0);
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                showPass = !showPass;
+                passwordField.setEchoChar(showPass ? (char) 0 : '•');
+            }
+        });
 
-        loginBtn.setPreferredSize(new Dimension(140, 40));
-        loginBtn.setBackground(Theme.ACCENT);
-        loginBtn.setForeground(Theme.WHITE);
-        loginBtn.setFont(Theme.BODY_FONT_BOLD.deriveFont(15f));
+        JPanel passwordContainer = createInputWrapper(passwordField, "🔒", eyeIcon);
+
+        // Login Button
+        loginBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+        loginBtn.setBackground(PRIMARY_GREEN);
+        loginBtn.setForeground(Color.WHITE);
+        loginBtn.setFont(new Font("SansSerif", Font.BOLD, 14));
         loginBtn.setFocusPainted(false);
-        loginBtn.setOpaque(true);
         loginBtn.setBorderPainted(false);
+        loginBtn.setOpaque(true);
         loginBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        card.add(loginBtn, gc);
+        loginBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        gc.gridy++;
-        gc.fill = GridBagConstraints.HORIZONTAL;
-        JButton toRegister = new JButton("No account? Register here");
+        // Footer Link
+        JPanel registerRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 4, 0));
+        registerRow.setOpaque(false);
+        JLabel noAccLabel = new JLabel("No account?");
+        noAccLabel.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        noAccLabel.setForeground(new Color(100, 110, 120));
+
+        JButton toRegister = new JButton("Register here");
         toRegister.setBorderPainted(false);
         toRegister.setContentAreaFilled(false);
-        toRegister.setFont(Theme.BODY_FONT_BOLD);
-        toRegister.setForeground(Theme.ACCENT);
+        toRegister.setFont(new Font("SansSerif", Font.BOLD, 13));
+        toRegister.setForeground(PRIMARY_GREEN);
         toRegister.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        gc.insets = new Insets(4, 0, 0, 0);
-        card.add(toRegister, gc);
 
-        GridBagConstraints center = new GridBagConstraints();
-        center.gridx = 0;
-        center.gridy = 0;
-        add(card, center);
+        registerRow.add(noAccLabel);
+        registerRow.add(toRegister);
+        registerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 
+        // Assemble Form
+        formCard.add(title);
+        formCard.add(Box.createVerticalStrut(6));
+        formCard.add(subtitle);
+        formCard.add(Box.createVerticalStrut(10));
+        formCard.add(errorLabel);
+        formCard.add(Box.createVerticalStrut(12));
+        formCard.add(emailLabel);
+        formCard.add(Box.createVerticalStrut(6));
+        formCard.add(emailContainer);
+        formCard.add(Box.createVerticalStrut(16));
+        formCard.add(passLabel);
+        formCard.add(Box.createVerticalStrut(6));
+        formCard.add(passwordContainer);
+        formCard.add(Box.createVerticalStrut(24));
+        formCard.add(loginBtn);
+        formCard.add(Box.createVerticalStrut(16));
+        formCard.add(registerRow);
+
+        rightPanel.add(formCard);
+
+        // Add both left and right sides
+        add(leftPanel);
+        add(rightPanel);
+
+        // Action Listeners
         loginBtn.addActionListener(e -> doLogin());
         passwordField.addActionListener(e -> doLogin());
         toRegister.addActionListener(e -> {
@@ -120,17 +215,44 @@ public class LoginPanel extends JPanel {
         });
     }
 
+    private JPanel createInputWrapper(JTextField field, String prefixIcon, JComponent suffixComp) {
+        JPanel wrapper = new JPanel(new BorderLayout(8, 0));
+        wrapper.setBackground(INPUT_BG);
+        wrapper.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(INPUT_BORDER, 1),
+                new EmptyBorder(6, 10, 6, 10)
+        ));
+        wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+        wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel prefix = new JLabel(prefixIcon);
+        prefix.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        prefix.setForeground(new Color(150, 160, 175));
+
+        field.setBorder(null);
+        field.setOpaque(false);
+        field.setFont(new Font("SansSerif", Font.PLAIN, 13));
+
+        wrapper.add(prefix, BorderLayout.WEST);
+        wrapper.add(field, BorderLayout.CENTER);
+        if (suffixComp != null) {
+            wrapper.add(suffixComp, BorderLayout.EAST);
+        }
+
+        return wrapper;
+    }
+
     private void doLogin() {
         errorLabel.setText(" ");
         loginBtn.setEnabled(false);
-        loginBtn.setText("Processing\u2026");
+        loginBtn.setText("Processing…");
 
         String email = emailField.getText().trim();
         String password = new String(passwordField.getPassword());
 
         if (email.isBlank() || password.isBlank()) {
             loginBtn.setEnabled(true);
-            loginBtn.setText("Login");
+            loginBtn.setText("Log in");
             errorLabel.setText("Enter both email and password.");
             return;
         }
@@ -151,7 +273,7 @@ public class LoginPanel extends JPanel {
             @Override
             protected void done() {
                 loginBtn.setEnabled(true);
-                loginBtn.setText("Login");
+                loginBtn.setText("Log in");
 
                 AuthService.LoginOutcome outcome;
                 try {
