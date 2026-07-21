@@ -81,10 +81,7 @@ public class DashboardChrome extends JPanel {
 
         contentArea.setBackground(Theme.WHITE);
         contentArea.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, Theme.LINE));
-        JScrollPane scroll = new JScrollPane(contentArea);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        scroll.getVerticalScrollBar().setUnitIncrement(16);
-        body.add(scroll, BorderLayout.CENTER);
+        body.add(contentArea, BorderLayout.CENTER);
         return body;
     }
 

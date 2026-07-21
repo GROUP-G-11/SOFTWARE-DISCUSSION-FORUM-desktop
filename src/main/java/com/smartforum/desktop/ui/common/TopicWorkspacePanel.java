@@ -173,6 +173,7 @@ public class TopicWorkspacePanel extends JPanel {
     // ------------------------------------------------------------------
 
     private final JPanel postsBody = new JPanel();
+    private final JScrollPane postsScroll = new JScrollPane(postsBody);
     private final JTextArea composer = new JTextArea(1, 30);
     private final JButton excludeBtn = Buttons.secondary("Exclude members");
     private final java.util.Set<Long> excludedUserIds = new java.util.HashSet<>();
@@ -208,10 +209,8 @@ public class TopicWorkspacePanel extends JPanel {
         postsBody.setOpaque(true);
         postsBody.setBackground(Theme.PAPER_DIM);
         postsBody.setBorder(new EmptyBorder(16, 16, 16, 16));
-        JScrollPane postsScroll = new JScrollPane(postsBody);
         postsScroll.setBorder(BorderFactory.createEmptyBorder());
         postsScroll.getVerticalScrollBar().setUnitIncrement(16);
-
         composer.setLineWrap(true);
         composer.setWrapStyleWord(true);
         composer.setFont(Theme.BODY_FONT);
@@ -293,12 +292,17 @@ public class TopicWorkspacePanel extends JPanel {
             postsBody.add(notice);
             postsBody.add(Box.createVerticalStrut(8));
         }
-        for (int i = 0; i < posts.length(); i++) {
+        for (int i = posts.length() - 1; i >= 0; i--) {
             postsBody.add(postCard(posts.getJSONObject(i)));
             postsBody.add(Box.createVerticalStrut(8));
         }
         postsBody.revalidate();
         postsBody.repaint();
+
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar vBar = postsScroll.getVerticalScrollBar();
+            vBar.setValue(vBar.getMaximum());
+        });
     }
 
     private JComponent postCard(JSONObject post) {
