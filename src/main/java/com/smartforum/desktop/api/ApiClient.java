@@ -4,6 +4,7 @@ import com.smartforum.desktop.util.AppConfig;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -12,6 +13,10 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Map;
+import java.io.File;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 /**
  * Thin REST wrapper around the Laravel backend (see routes/api.php on the
@@ -82,6 +87,9 @@ public class ApiClient {
     public JSONObject updateProfile(Map<String, Object> fields) throws ApiException, ApiOfflineException {
         JSONObject body = new JSONObject(fields);
         return patchJson("/me", body);
+    }
+    public JSONObject uploadAvatar(File file) throws ApiException, ApiOfflineException {
+        return new JSONObject(multipartPost("/me/avatar", "avatar", file));
     }
 
     // ------------------------------------------------------------------
@@ -337,6 +345,7 @@ public class ApiClient {
         return postJson("/posts/" + postId + "/share", new JSONObject().put("platform", platform));
     }
 
+
     // ------------------------------------------------------------------
     // 5.10 Notifications
     // ------------------------------------------------------------------
@@ -448,5 +457,48 @@ public class ApiClient {
 
     private static String urlEncode(String value) {
         return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private String multipartPost(String path, String fieldName, File file) throws ApiException, ApiOfflineException {
+        String boundary = "----SDFBoundary" + System.currentTimeMillis();
+        String fileName = file.getName();
+        String mimeType = URLConnection.guessContentTypeFromName(fileName);
+        if (mimeType == null) mimeType = "application/octet-stream";
+
+        try {
+            byte[] fileBytes = Files.readAllBytes(file.toPath());
+
+            var parts = new java.util.ArrayList<byte[]>();
+            String header = "--" + boundary + "\r\n" +
+                    "Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + fileName + "\"\r\n" +
+                    "Content-Type: " + mimeType + "\r\n\r\n";
+            parts.add(header.getBytes(StandardCharsets.UTF_8));
+            parts.add(fileBytes);
+            parts.add(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + path))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArrays(parts));
+
+            if (bearerToken != null) {
+                builder.header("Authorization", "Bearer " + bearerToken);
+            }
+
+            HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            int status = response.statusCode();
+            if (status >= 200 && status < 300) {
+                return response.body();
+            }
+            throw new ApiException(status, extractMessage(response.body()), response.body());
+
+        } catch (HttpTimeoutException e) {
+            throw new ApiOfflineException("Uploading the avatar timed out.", e);
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ApiOfflineException("Could not reach the server to upload the avatar.", e);
+        }
     }
 }

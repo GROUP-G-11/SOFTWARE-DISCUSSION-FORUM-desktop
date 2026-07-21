@@ -7,7 +7,9 @@ import org.json.JSONObject;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
+import java.io.File;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -18,9 +20,10 @@ import java.util.Map;
 public class ProfilePanel extends JPanel {
 
     private final AppContext ctx;
-    private final JLabel avatarCircle = new JLabel("", SwingConstants.CENTER);
+    private final AvatarView avatarView = new AvatarView(64, Theme.ACCENT, Theme.ACCENT_DARK);
     private final JLabel nameLabel = new JLabel();
     private final JLabel roleBadge = new JLabel();
+    private final JLabel chosenFileLabel = new JLabel("No file chosen");
     private final JTextField nameField = new JTextField(30);
     private final JTextArea bioField = new JTextArea(3, 30);
     private final JTextField phoneField = new JTextField(30);
@@ -28,12 +31,13 @@ public class ProfilePanel extends JPanel {
     private final JTextField departmentField = new JTextField(30);
     private final JLabel status = new JLabel(" ");
 
+    private File pendingAvatarFile;
+
     public ProfilePanel(AppContext ctx) {
         this.ctx = ctx;
         setLayout(new GridBagLayout());
         setBackground(Theme.WHITE);
 
-        // Profile Card
         JPanel card = new JPanel(new BorderLayout(0, 12));
         card.setBackground(Theme.WHITE);
         card.setBorder(BorderFactory.createCompoundBorder(
@@ -44,12 +48,11 @@ public class ProfilePanel extends JPanel {
         card.add(buildForm(), BorderLayout.CENTER);
         card.add(buildFooter(), BorderLayout.SOUTH);
 
-        // Dock Card to TOP-CENTER with natural height
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridx = 0;
         gbc.gridy = 0;
-        gbc.anchor = GridBagConstraints.NORTH; // Docks at top
-        gbc.weighty = 1.0;                     // Pushes extra vertical space downwards
+        gbc.anchor = GridBagConstraints.NORTH;
+        gbc.weighty = 1.0;
         gbc.insets = new Insets(20, 0, 20, 0);
 
         add(card, gbc);
@@ -60,14 +63,7 @@ public class ProfilePanel extends JPanel {
         header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
         header.setOpaque(false);
 
-        avatarCircle.setOpaque(true);
-        avatarCircle.setBackground(Theme.ACCENT);
-        avatarCircle.setForeground(Theme.WHITE);
-        avatarCircle.setFont(Theme.HEADING_FONT.deriveFont(22f));
-        avatarCircle.setPreferredSize(new Dimension(64, 64));
-        avatarCircle.setMaximumSize(new Dimension(64, 64));
-        avatarCircle.setAlignmentX(Component.CENTER_ALIGNMENT);
-        avatarCircle.setBorder(BorderFactory.createLineBorder(Theme.ACCENT_DARK, 2, true));
+        avatarView.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         nameLabel.setFont(Theme.HEADING_FONT_SM);
         nameLabel.setForeground(Theme.INK);
@@ -77,7 +73,7 @@ public class ProfilePanel extends JPanel {
         roleBadge.setForeground(Theme.ACCENT_DARK);
         roleBadge.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        header.add(avatarCircle);
+        header.add(avatarView);
         header.add(Box.createVerticalStrut(6));
         header.add(nameLabel);
         header.add(Box.createVerticalStrut(2));
@@ -95,6 +91,10 @@ public class ProfilePanel extends JPanel {
         gc.gridx = 0;
         gc.weightx = 1.0;
         gc.gridy = 0;
+
+        form.add(fieldLabel("Profile picture"), gc);
+        gc.gridy++;
+        form.add(buildFilePickerRow(), gc);
 
         nameField.setPreferredSize(new Dimension(480, 32));
         phoneField.setPreferredSize(new Dimension(480, 32));
@@ -129,6 +129,32 @@ public class ProfilePanel extends JPanel {
         return form;
     }
 
+    private JComponent buildFilePickerRow() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.setOpaque(false);
+
+        JButton chooseBtn = Buttons.secondary("Choose file");
+        chooseBtn.addActionListener(e -> pickAvatarFile());
+
+        chosenFileLabel.setFont(Theme.SMALL_FONT);
+        chosenFileLabel.setForeground(Theme.MUTED);
+
+        row.add(chooseBtn);
+        row.add(chosenFileLabel);
+        return row;
+    }
+
+    private void pickAvatarFile() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileFilter(new FileNameExtensionFilter("Image files", "jpg", "jpeg", "png", "gif"));
+        int result = chooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            pendingAvatarFile = chooser.getSelectedFile();
+            chosenFileLabel.setText(pendingAvatarFile.getName());
+            avatarView.setImageFile(pendingAvatarFile);
+        }
+    }
+
     private void addField(JPanel form, GridBagConstraints gc, String label, JComponent field) {
         gc.gridy++;
         form.add(fieldLabel(label), gc);
@@ -148,13 +174,22 @@ public class ProfilePanel extends JPanel {
         footer.setOpaque(false);
         footer.setBorder(new EmptyBorder(10, 0, 0, 0));
 
+        JPanel buttonsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        buttonsRow.setOpaque(false);
+
         JButton saveBtn = Buttons.primary("Save changes");
         saveBtn.addActionListener(e -> save());
+
+        JButton cancelBtn = Buttons.secondary("Cancel");
+        cancelBtn.addActionListener(e -> cancel());
+
+        buttonsRow.add(saveBtn);
+        buttonsRow.add(cancelBtn);
 
         status.setForeground(Theme.ACCENT);
         status.setFont(Theme.SMALL_FONT);
 
-        footer.add(saveBtn, BorderLayout.WEST);
+        footer.add(buttonsRow, BorderLayout.WEST);
         footer.add(status, BorderLayout.EAST);
         return footer;
     }
@@ -171,7 +206,22 @@ public class ProfilePanel extends JPanel {
 
         nameLabel.setText(fullName.isBlank() ? "Your profile" : fullName);
         roleBadge.setText(ctx.session.primaryRole().toUpperCase());
-        avatarCircle.setText(initials(fullName));
+
+        if (pendingAvatarFile == null) {
+            String avatarUrl = user.optString("avatar_url", "");
+            if (!avatarUrl.isBlank()) {
+                avatarView.loadFromUrl(avatarUrl);
+            } else {
+                avatarView.setInitials(initials(fullName));
+            }
+        }
+    }
+
+    private void cancel() {
+        pendingAvatarFile = null;
+        chosenFileLabel.setText("No file chosen");
+        status.setText(" ");
+        refresh();
     }
 
     private static String initials(String name) {
@@ -192,12 +242,17 @@ public class ProfilePanel extends JPanel {
         fields.put("phone_public", phonePublicBox.isSelected());
         fields.put("department", departmentField.getText().trim());
 
+        final File avatarToUpload = pendingAvatarFile;
+
         new SwingWorker<JSONObject, Void>() {
             String error = null;
 
             @Override
             protected JSONObject doInBackground() {
                 try {
+                    if (avatarToUpload != null) {
+                        ctx.api.uploadAvatar(avatarToUpload);
+                    }
                     return ctx.api.updateProfile(fields);
                 } catch (ApiOfflineException e) {
                     error = "Saving your profile needs an internet connection.";
@@ -217,6 +272,8 @@ public class ProfilePanel extends JPanel {
                 try {
                     JSONObject response = get();
                     ctx.session.set(response.getJSONObject("user"), ctx.session.token(), ctx.session.isOfflineMode());
+                    pendingAvatarFile = null;
+                    chosenFileLabel.setText("No file chosen");
                     refresh();
                 } catch (Exception ignored) {
                 }
