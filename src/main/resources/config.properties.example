@@ -1,0 +1,5 @@
+# Copy this file to config.properties (same folder) and edit as needed.
+# Both keys are optional - see README.md for defaults.
+
+api.baseUrl=http://127.0.0.1:8000/api
+# db.file=/absolute/path/to/local-cache.sqlite

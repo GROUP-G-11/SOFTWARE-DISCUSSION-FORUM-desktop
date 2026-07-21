@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.smartforum</groupId>
+    <artifactId>smart-discussion-forum-desktop</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>Smart Discussion Forum - Desktop Client</name>
+    <description>
+        Java Swing desktop client for the Smart Discussion Forum. Talks to the
+        Laravel backend over REST for live data, keeps a local SQLite cache for
+        offline reading and queued (outbox) writes, and reconciles the two via
+        the /sync endpoint once connectivity returns.
+    </description>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Base URL of the Laravel backend. Override with
+             -Dsdf.api.baseUrl=... at runtime, or edit config.properties. -->
+        <sdf.api.baseUrl>http://127.0.0.1:8000/api</sdf.api.baseUrl>
+
+        <org.json.version>20260522</org.json.version>
+        <sqlite.jdbc.version>3.53.2.0</sqlite.jdbc.version>
+        <flatlaf.version>3.7.2</flatlaf.version>
+        <java-websocket.version>1.6.0</java-websocket.version>
+    </properties>
+
+    <dependencies>
+        <!-- Lightweight JSON parsing/building for REST payloads -->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>${org.json.version}</version>
+        </dependency>
+
+        <!-- Local offline cache + outbox queue -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>${sqlite.jdbc.version}</version>
+        </dependency>
+
+        <!-- FlatLaf gives Swing a clean, modern look we theme to match the
+             Laravel web client's cream/navy/green palette instead of the
+             default grey Metal look-and-feel. -->
+        <dependency>
+            <groupId>com.formdev</groupId>
+            <artifactId>flatlaf</artifactId>
+            <version>${flatlaf.version}</version>
+        </dependency>
+
+        <!-- Real-time channel client (topic presence channels, mirrors the
+             web client's Laravel Echo / Reverb websocket connection). -->
+        <dependency>
+            <groupId>org.java-websocket</groupId>
+            <artifactId>Java-WebSocket</artifactId>
+            <version>${java-websocket.version}</version>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.11.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.13</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>smart-discussion-forum-desktop</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+
+            <!-- Produces a single runnable jar with all dependencies bundled,
+                 so IntelliJ's "Run" or `java -jar target/....jar` just works
+                 without the person having to wire up a classpath by hand. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.smartforum.desktop.Main</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
