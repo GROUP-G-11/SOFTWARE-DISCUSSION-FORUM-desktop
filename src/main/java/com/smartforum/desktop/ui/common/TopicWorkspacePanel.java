@@ -22,6 +22,8 @@ public class TopicWorkspacePanel extends JPanel {
     private final JPanel threadBody = new JPanel();
     private final JLabel threadTitle = new JLabel();
     private final JLabel groupTitle = new JLabel("Topics");
+    private final JTextField searchField = new JTextField();
+    private final javax.swing.Timer searchDebounce = new javax.swing.Timer(350, null);
 
     private long currentGroupId = -1;
     private long currentTopicId = -1;
@@ -76,7 +78,14 @@ public class TopicWorkspacePanel extends JPanel {
         topicListBody.setLayout(new BoxLayout(topicListBody, BoxLayout.Y_AXIS));
         topicListBody.setOpaque(false);
 
-        wrap.add(top, BorderLayout.NORTH);
+        JPanel headerStack = new JPanel();
+        headerStack.setLayout(new BoxLayout(headerStack, BoxLayout.Y_AXIS));
+        headerStack.setOpaque(false);
+        headerStack.add(top);
+        headerStack.add(Box.createVerticalStrut(14));
+        headerStack.add(buildSearchBar());
+
+        wrap.add(headerStack, BorderLayout.NORTH);
         wrap.add(new JScrollPane(topicListBody), BorderLayout.CENTER);
         return wrap;
     }
@@ -89,7 +98,9 @@ public class TopicWorkspacePanel extends JPanel {
             @Override
             protected JSONArray doInBackground() {
                 try {
-                    JSONObject response = ctx.api.listTopics(groupId, null, null);
+                    String q = searchField.getText();
+                    String search = (q == null || q.equals("Search topics...") || q.isBlank()) ? null : q.trim();
+                    JSONObject response = ctx.api.listTopics(groupId, search, null);
                     JSONArray data = response.optJSONArray("data", new JSONArray());
                     ctx.store.cacheTopics(groupId, data);
                     return data;
@@ -678,6 +689,62 @@ public class TopicWorkspacePanel extends JPanel {
         dialog.setVisible(true);
     }
 
+    private JComponent buildSearchBar() {
+        JPanel wrapper = new JPanel(new BorderLayout(8, 0));
+        wrapper.setBackground(Theme.WHITE);
+        wrapper.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.ACCENT, 1, true),
+                new EmptyBorder(8, 14, 8, 14)));
+        wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+        wrapper.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        searchField.setBorder(null);
+        searchField.setOpaque(false);
+        searchField.setFont(Theme.BODY_FONT);
+        searchField.setForeground(Theme.INK);
+
+        JLabel icon = new JLabel("\uD83D\uDD0D"); // 🔍
+        icon.setFont(Theme.BODY_FONT);
+        icon.setForeground(Theme.MUTED);
+
+        wrapper.add(searchField, BorderLayout.CENTER);
+        wrapper.add(icon, BorderLayout.EAST);
+
+        // Placeholder text (Swing has no native placeholder attribute)
+        searchField.setText("Search topics...");
+        searchField.setForeground(Theme.MUTED);
+        searchField.addFocusListener(new java.awt.event.FocusAdapter() {
+            public void focusGained(java.awt.event.FocusEvent e) {
+                if (searchField.getText().equals("Search topics...")) {
+                    searchField.setText("");
+                    searchField.setForeground(Theme.INK);
+                }
+            }
+            public void focusLost(java.awt.event.FocusEvent e) {
+                if (searchField.getText().isBlank()) {
+                    searchField.setText("Search topics...");
+                    searchField.setForeground(Theme.MUTED);
+                }
+            }
+        });
+
+        // Debounce: wait 350ms after the last keystroke before hitting the API
+        searchDebounce.setRepeats(false);
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { trigger(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { trigger(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { trigger(); }
+            private void trigger() {
+                searchDebounce.stop();
+                for (var l : searchDebounce.getActionListeners()) searchDebounce.removeActionListener(l);
+                searchDebounce.addActionListener(ev -> refreshTopicList());
+                searchDebounce.start();
+            }
+        });
+
+        return wrapper;
+    }
+
     private void sendPost() {
         String text = composer.getText().trim();
         if (text.isBlank()) return;
@@ -699,6 +766,8 @@ public class TopicWorkspacePanel extends JPanel {
                     return null;
                 }
             }
+
+
 
             @Override
             protected void done() {

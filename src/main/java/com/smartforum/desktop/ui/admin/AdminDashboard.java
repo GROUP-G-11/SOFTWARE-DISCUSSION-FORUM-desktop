@@ -12,6 +12,11 @@ import java.util.List;
  * not get a Notifications nav item (that's student/lecturer only), and
  * Groups deliberately has no click-through to messages - see GroupsPanel's
  * ADMIN mode.
+ *
+ * Statistics and Gradebook are full pages (their own CardLayout entries in
+ * DashboardChrome) rather than popup dialogs - reached only by clicking the
+ * Statistics/Gradebook button on a group row in the Groups page. They have
+ * no sidebar nav item of their own, same as the lecturer dashboard.
  */
 public class AdminDashboard {
 
@@ -28,10 +33,23 @@ public class AdminDashboard {
         DashboardChrome chrome = new DashboardChrome(ctx, navItems, onLogout);
 
         SystemStatisticsPanel overviewPanel = new SystemStatisticsPanel(ctx);
+        GroupStatisticsPanel statsPanel = new GroupStatisticsPanel(ctx, () -> chrome.showPanel("groups"));
+        GroupGradebookPanel gradebookPanel = new GroupGradebookPanel(ctx, () -> chrome.showPanel("groups"));
+
         // Administrators never open a group's messages - GroupsPanel's
         // ADMIN mode ignores this callback entirely (only Statistics/
-        // Gradebook dialogs are reachable), so a no-op is safe here.
-        GroupsPanel groupsPanel = new GroupsPanel(ctx, GroupsPanel.Mode.ADMIN, groupId -> {});
+        // Gradebook pages are reachable), so a no-op is safe here.
+        GroupsPanel groupsPanel = new GroupsPanel(ctx, GroupsPanel.Mode.ADMIN,
+                groupId -> {},
+                groupId -> {
+                    chrome.showPanel("group-statistics");
+                    statsPanel.open(groupId);
+                },
+                groupId -> {
+                    chrome.showPanel("group-gradebook");
+                    gradebookPanel.open(groupId);
+                });
+
         WarningsPanel warningsPanel = new WarningsPanel(ctx);
         BlacklistsPanel blacklistsPanel = new BlacklistsPanel(ctx);
         UserManagementPanel usersPanel = new UserManagementPanel(ctx);
@@ -39,6 +57,8 @@ public class AdminDashboard {
 
         chrome.addPanel("overview", overviewPanel);
         chrome.addPanel("groups", groupsPanel);
+        chrome.addPanel("group-statistics", statsPanel);
+        chrome.addPanel("group-gradebook", gradebookPanel);
         chrome.addPanel("warnings", warningsPanel);
         chrome.addPanel("blacklists", blacklistsPanel);
         chrome.addPanel("users", usersPanel);

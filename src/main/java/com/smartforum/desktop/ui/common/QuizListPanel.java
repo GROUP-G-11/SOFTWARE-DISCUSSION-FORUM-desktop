@@ -52,7 +52,7 @@ public class QuizListPanel extends JPanel {
     public QuizListPanel(AppContext ctx, boolean canManage) {
         this.ctx = ctx;
         this.canManage = canManage;
-        setLayout(new BorderLayout(0, 18));
+        setLayout(new BorderLayout(0, 16));
         setBorder(new EmptyBorder(24, 28, 24, 28));
         setBackground(Theme.WHITE);
 
@@ -60,36 +60,43 @@ public class QuizListPanel extends JPanel {
         title.setFont(Theme.HEADING_FONT);
         title.setForeground(Theme.INK);
 
-        JPanel north = new JPanel();
-        north.setOpaque(false);
-        north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
-        north.add(title);
+        JPanel top = new JPanel(new BorderLayout());
+        top.setOpaque(false);
+        top.add(title, BorderLayout.WEST);
 
-        JPanel center;
+        // Same structure as NotificationsPanel/RecommendedTopicsPanel: title
+        // fixed in NORTH, everything scrollable lives in ONE JScrollPane in
+        // CENTER. That's what gives those two panels smooth mouse-wheel /
+        // touchpad scrolling - matching it here fixes the "only the
+        // scrollbar works" feel this panel had before.
+        JPanel body = new JPanel();
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        body.setOpaque(false);
+
         if (canManage) {
-            north.add(Box.createVerticalStrut(14));
-            north.add(buildCreateForm());
+            JComponent createForm = buildCreateForm();
+            createForm.setAlignmentX(Component.LEFT_ALIGNMENT);
+            body.add(createForm);
+
             JLabel listTitle = new JLabel("Your quizzes");
             listTitle.setFont(Theme.HEADING_FONT_SM);
             listTitle.setForeground(Theme.INK);
-            listTitle.setBorder(new EmptyBorder(20, 0, 8, 0));
-            north.add(listTitle);
-            center = quizListPanel();
-        } else {
-            center = quizListPanel();
+            listTitle.setBorder(new EmptyBorder(20, 0, 10, 0));
+            listTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+            body.add(listTitle);
         }
 
-        add(north, BorderLayout.NORTH);
-        add(center, BorderLayout.CENTER);
-    }
-
-    private JPanel quizListPanel() {
         quizListBody.setLayout(new BoxLayout(quizListBody, BoxLayout.Y_AXIS));
         quizListBody.setOpaque(false);
-        JPanel wrap = new JPanel(new BorderLayout());
-        wrap.setOpaque(false);
-        wrap.add(new JScrollPane(quizListBody), BorderLayout.CENTER);
-        return wrap;
+        quizListBody.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(quizListBody);
+
+        JScrollPane scrollPane = new JScrollPane(body);
+        scrollPane.setBorder(null);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(12);
+
+        add(top, BorderLayout.NORTH);
+        add(scrollPane, BorderLayout.CENTER);
     }
 
     // ------------------------------------------------------------------
@@ -320,10 +327,12 @@ public class QuizListPanel extends JPanel {
             }
 
             @Override
+
             protected void done() {
                 try {
                     render(get());
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
         }.execute();
@@ -356,7 +365,7 @@ public class QuizListPanel extends JPanel {
                 targetGroupBox.removeAllItems();
                 for (int i = 0; i < groups.length(); i++) {
                     JSONObject g = groups.getJSONObject(i);
-                    if (g.optBoolean("is_owner", false) || g.optBoolean("is_group_admin", false)) {
+                    if (g.optBoolean("is_member", false) || g.optBoolean("is_owner", false) || g.optBoolean("is_group_admin", false)) {
                         targetGroupBox.addItem(new GroupChoice(g.getLong("group_id"), g.optString("name", "Group")));
                     }
                 }
@@ -373,14 +382,27 @@ public class QuizListPanel extends JPanel {
             empty.setForeground(Color.GRAY);
             quizListBody.add(empty);
         }
+        int failed = 0;
         for (int i = 0; i < quizzes.length(); i++) {
-            quizListBody.add(quizRow(quizzes.getJSONObject(i)));
-            quizListBody.add(Box.createVerticalStrut(1));
+            try {
+                JSONObject quiz = quizzes.getJSONObject(i);
+                System.out.println("DEBUG quiz row " + i + ": " + quiz.toString(2));
+                quizListBody.add(quizRow(quiz));
+                quizListBody.add(Box.createVerticalStrut(1));
+            } catch (Exception e) {
+                failed++;
+                System.out.println("DEBUG: failed to render quiz row " + i);
+                e.printStackTrace();
+            }
+        }
+        if (failed > 0) {
+            JLabel warn = new JLabel(failed + " quiz(zes) couldn't be displayed \u2013 check console for details.");
+            warn.setForeground(Theme.WARN);
+            quizListBody.add(warn);
         }
         quizListBody.revalidate();
         quizListBody.repaint();
     }
-
     private JComponent quizRow(JSONObject quiz) {
         JPanel row = new JPanel(new BorderLayout());
         row.setBorder(BorderFactory.createCompoundBorder(

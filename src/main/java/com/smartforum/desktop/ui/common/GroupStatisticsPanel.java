@@ -11,44 +11,70 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 
-public class GroupStatisticsDialog extends JDialog {
+/**
+ * Full-page version of the old GroupStatisticsDialog. Registered as a
+ * CardLayout page in DashboardChrome instead of opened as a JDialog popup,
+ * matching how Laravel gives statistics its own route/page rather than a
+ * modal. Call open(groupId) right after chrome.showPanel("group-statistics").
+ */
+public class GroupStatisticsPanel extends JPanel {
 
-    public GroupStatisticsDialog(Window owner, AppContext ctx, long groupId) {
-        super(owner, "Group Statistics", ModalityType.APPLICATION_MODAL);
-        setSize(560, 520);
-        setLocationRelativeTo(owner);
-        getContentPane().setBackground(Theme.WHITE);
+    private final AppContext ctx;
+    private final JLabel title = new JLabel("Loading\u2026");
+    private final JPanel metricsPanel = new JPanel(new GridLayout(2, 2, 12, 12));
+    private final DefaultTableModel model =
+            new DefaultTableModel(new Object[]{"Name", "Last active"}, 0);
 
-        JLabel title = new JLabel("Loading\u2026");
-        title.setFont(Theme.HEADING_FONT_SM);
+    public GroupStatisticsPanel(AppContext ctx, Runnable onBack) {
+        this.ctx = ctx;
+        setLayout(new BorderLayout(0, 12));
+        setBorder(new EmptyBorder(24, 28, 24, 28));
+        setBackground(Theme.WHITE);
+
+        JButton back = Buttons.link("\u2190 Back to Groups", Theme.SKY);
+        back.addActionListener(e -> onBack.run());
+
+        title.setFont(Theme.HEADING_FONT.deriveFont(22f));
         title.setForeground(Theme.INK);
 
-        JPanel metricsPanel = new JPanel(new GridLayout(2, 2, 12, 12));
+        JPanel header = new JPanel();
+        header.setOpaque(false);
+        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+        JPanel backRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        backRow.setOpaque(false);
+        backRow.add(back);
+        header.add(backRow);
+        header.add(Box.createVerticalStrut(6));
+        header.add(title);
+
         metricsPanel.setOpaque(false);
         metricsPanel.setBorder(new EmptyBorder(14, 0, 14, 0));
 
         JLabel strugglingTitle = new JLabel("Struggling students (idle 7+ days)");
         strugglingTitle.setFont(Theme.BODY_FONT_BOLD);
-        DefaultTableModel model = new DefaultTableModel(new Object[]{"Name", "Last active"}, 0);
         JTable table = new JTable(model);
-        table.setRowHeight(24);
+        table.setRowHeight(26);
 
-        JPanel content = new JPanel(new BorderLayout(0, 8));
-        content.setOpaque(false);
-        content.add(title, BorderLayout.NORTH);
-        JPanel center = new JPanel(new BorderLayout(0, 10));
-        center.setOpaque(false);
-        center.add(metricsPanel, BorderLayout.NORTH);
         JPanel strugglingWrap = new JPanel(new BorderLayout(0, 6));
         strugglingWrap.setOpaque(false);
         strugglingWrap.add(strugglingTitle, BorderLayout.NORTH);
         strugglingWrap.add(new JScrollPane(table), BorderLayout.CENTER);
-        center.add(strugglingWrap, BorderLayout.CENTER);
-        content.add(center, BorderLayout.CENTER);
 
-        setLayout(new BorderLayout());
-        ((JComponent) getContentPane()).setBorder(new EmptyBorder(20, 24, 20, 24));
-        add(content, BorderLayout.CENTER);
+        add(header, BorderLayout.NORTH);
+        JPanel center = new JPanel(new BorderLayout(0, 10));
+        center.setOpaque(false);
+        center.add(metricsPanel, BorderLayout.NORTH);
+        center.add(strugglingWrap, BorderLayout.CENTER);
+        add(center, BorderLayout.CENTER);
+    }
+
+    /** Call this right after navigating to this page for a given group. */
+    public void open(long groupId) {
+        title.setText("Loading\u2026");
+        metricsPanel.removeAll();
+        model.setRowCount(0);
+        metricsPanel.revalidate();
+        metricsPanel.repaint();
 
         new SwingWorker<JSONObject, Void>() {
             @Override
@@ -70,7 +96,11 @@ public class GroupStatisticsDialog extends JDialog {
                 }
                 if (stats == null || stats.has("message")) {
                     title.setText("Access denied");
-                    metricsPanel.add(new JLabel(stats != null ? stats.optString("message") : "You do not have access to this group's statistics."));
+                    metricsPanel.add(new JLabel(stats != null
+                            ? stats.optString("message")
+                            : "You do not have access to this group's statistics."));
+                    metricsPanel.revalidate();
+                    metricsPanel.repaint();
                     return;
                 }
                 title.setText(stats.optString("group", "Group") + " \u2014 analytics");
@@ -78,6 +108,8 @@ public class GroupStatisticsDialog extends JDialog {
                 metricsPanel.add(metric("Active contributors (7 days)", stats.opt("active_contributors")));
                 metricsPanel.add(metric("Currently banned", stats.opt("banned_individuals")));
                 metricsPanel.add(metric("Unanswered topics", stats.opt("unanswered_topics")));
+                metricsPanel.revalidate();
+                metricsPanel.repaint();
 
                 JSONArray struggling = stats.optJSONArray("struggling_students", new JSONArray());
                 for (int i = 0; i < struggling.length(); i++) {

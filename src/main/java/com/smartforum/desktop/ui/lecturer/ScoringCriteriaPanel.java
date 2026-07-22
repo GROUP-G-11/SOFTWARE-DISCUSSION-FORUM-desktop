@@ -210,7 +210,7 @@ public class ScoringCriteriaPanel extends JPanel {
                 groupPicker.removeAllItems();
                 for (int i = 0; i < groups.length(); i++) {
                     JSONObject g = groups.getJSONObject(i);
-                    if (g.optBoolean("is_owner", false) || g.optBoolean("is_group_admin", false)) {
+                    if (g.optBoolean("is_member", false) || g.optBoolean("is_owner", false) || g.optBoolean("is_group_admin", false)) {
                         groupPicker.addItem(new GroupChoice(g.getLong("group_id"), g.optString("name", "Group")));
                     }
                 }
