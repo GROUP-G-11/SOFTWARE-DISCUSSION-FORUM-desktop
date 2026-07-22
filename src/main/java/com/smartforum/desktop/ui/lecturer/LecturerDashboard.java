@@ -102,4 +102,4 @@ public class LecturerDashboard {
         new javax.swing.Timer(20000, e -> check.run()).start();
     }
 }
-}
+
