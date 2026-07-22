@@ -11,6 +11,13 @@ import java.util.List;
  * Notifications, My Profile. There is no standalone "Gradebook" nav item
  * in Laravel - the gradebook is only reachable per-group, via a button on
  * that group's card in the Groups panel (GroupsPanel.Mode.LECTURER).
+ *
+ * Statistics and Gradebook are now full pages (their own CardLayout entries
+ * in DashboardChrome) rather than popup dialogs - reached only by clicking
+ * the Statistics/Gradebook button on a group row, same way "Open" drills
+ * into the Topics page. They deliberately have no sidebar nav item of
+ * their own, mirroring how Laravel's group-scoped statistics/gradebook
+ * routes aren't in the main nav either.
  */
 public class LecturerDashboard {
 
@@ -26,10 +33,23 @@ public class LecturerDashboard {
         DashboardChrome chrome = new DashboardChrome(ctx, navItems, onLogout);
 
         TopicWorkspacePanel topicWorkspace = new TopicWorkspacePanel(ctx);
-        GroupsPanel groupsPanel = new GroupsPanel(ctx, GroupsPanel.Mode.LECTURER, groupId -> {
-            chrome.showPanel("topics");
-            topicWorkspace.openGroup(groupId, null);
-        });
+        GroupStatisticsPanel statsPanel = new GroupStatisticsPanel(ctx, () -> chrome.showPanel("groups"));
+        GroupGradebookPanel gradebookPanel = new GroupGradebookPanel(ctx, () -> chrome.showPanel("groups"));
+
+        GroupsPanel groupsPanel = new GroupsPanel(ctx, GroupsPanel.Mode.LECTURER,
+                groupId -> {
+                    chrome.showPanel("topics");
+                    topicWorkspace.openGroup(groupId, null);
+                },
+                groupId -> {
+                    chrome.showPanel("group-statistics");
+                    statsPanel.open(groupId);
+                },
+                groupId -> {
+                    chrome.showPanel("group-gradebook");
+                    gradebookPanel.open(groupId);
+                });
+
         QuizListPanel quizzesPanel = new QuizListPanel(ctx, true);
         ScoringCriteriaPanel criteriaPanel = new ScoringCriteriaPanel(ctx);
         NotificationsPanel notificationsPanel = new NotificationsPanel(ctx);
@@ -37,6 +57,8 @@ public class LecturerDashboard {
 
         chrome.addPanel("groups", groupsPanel);
         chrome.addPanel("topics", topicWorkspace);
+        chrome.addPanel("group-statistics", statsPanel);
+        chrome.addPanel("group-gradebook", gradebookPanel);
         chrome.addPanel("quizzes", quizzesPanel);
         chrome.addPanel("criteria", criteriaPanel);
         chrome.addPanel("notifications", notificationsPanel);

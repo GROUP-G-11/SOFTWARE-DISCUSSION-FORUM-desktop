@@ -21,10 +21,27 @@ public class StudentDashboard {
         DashboardChrome chrome = new DashboardChrome(ctx, navItems, onLogout);
 
         TopicWorkspacePanel topicWorkspace = new TopicWorkspacePanel(ctx);
-        GroupsPanel groupsPanel = new GroupsPanel(ctx, GroupsPanel.Mode.STUDENT, groupId -> {
-            chrome.showPanel("topics");
-            topicWorkspace.openGroup(groupId, null);
-        });
+        // A student who is also a group admin/owner for one of their groups
+        // can view that group's Statistics and Gradebook (GroupsPanel gates
+        // the buttons on canViewStats, not on role), so these need real
+        // navigation here too, not no-ops.
+        GroupStatisticsPanel statsPanel = new GroupStatisticsPanel(ctx, () -> chrome.showPanel("groups"));
+        GroupGradebookPanel gradebookPanel = new GroupGradebookPanel(ctx, () -> chrome.showPanel("groups"));
+
+        GroupsPanel groupsPanel = new GroupsPanel(ctx, GroupsPanel.Mode.STUDENT,
+                groupId -> {
+                    chrome.showPanel("topics");
+                    topicWorkspace.openGroup(groupId, null);
+                },
+                groupId -> {
+                    chrome.showPanel("group-statistics");
+                    statsPanel.open(groupId);
+                },
+                groupId -> {
+                    chrome.showPanel("group-gradebook");
+                    gradebookPanel.open(groupId);
+                });
+
         MyGradePanel gradesPanel = new MyGradePanel(ctx);
         QuizListPanel quizzesPanel = new QuizListPanel(ctx, false);
         RecommendedTopicsPanel recommendedPanel = new RecommendedTopicsPanel(ctx, topicId -> {
@@ -39,6 +56,8 @@ public class StudentDashboard {
 
         chrome.addPanel("groups", groupsPanel);
         chrome.addPanel("topics", topicWorkspace);
+        chrome.addPanel("group-statistics", statsPanel);
+        chrome.addPanel("group-gradebook", gradebookPanel);
         chrome.addPanel("grades", gradesPanel);
         chrome.addPanel("quizzes", quizzesPanel);
         chrome.addPanel("recommended", recommendedPanel);

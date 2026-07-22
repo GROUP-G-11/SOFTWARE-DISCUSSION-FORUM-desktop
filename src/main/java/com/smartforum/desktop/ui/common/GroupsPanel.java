@@ -34,10 +34,17 @@ public class GroupsPanel extends JPanel {
     private final JPanel listContainer = new JPanel();
     private final JLabel offlineNotice = new JLabel();
 
-    public GroupsPanel(AppContext ctx, Mode mode, Consumer<Long> onOpenGroup) {
+
+    private final Consumer<Long> onViewStatistics;
+    private final Consumer<Long> onViewGradebook;
+
+    public GroupsPanel(AppContext ctx, Mode mode, Consumer<Long> onOpenGroup,
+                       Consumer<Long> onViewStatistics, Consumer<Long> onViewGradebook) {
         this.ctx = ctx;
         this.mode = mode;
         this.onOpenGroup = onOpenGroup;
+        this.onViewStatistics = onViewStatistics;
+        this.onViewGradebook = onViewGradebook;
         setLayout(new BorderLayout(0, 12));
         setBorder(new EmptyBorder(24, 28, 24, 28));
         setBackground(Theme.WHITE);
@@ -172,27 +179,27 @@ public class GroupsPanel extends JPanel {
             // (StatisticsController::authorizeGroupAccess() allows
             // Administrator unconditionally) - no join/open controls at all.
             JButton stats = Buttons.secondary("Statistics");
-            stats.addActionListener(e -> new GroupStatisticsDialog(SwingUtilities.getWindowAncestor(this), ctx, groupId).setVisible(true));
+            stats.addActionListener(e -> onViewStatistics.accept(groupId));
             JButton gradebook = Buttons.secondary("Gradebook");
-            gradebook.addActionListener(e -> new GradebookDialog(SwingUtilities.getWindowAncestor(this), ctx, groupId).setVisible(true));
+            gradebook.addActionListener(e -> onViewGradebook.accept(groupId));
             right.add(stats);
             right.add(gradebook);
         } else if (isBanned) {
             right.add(Buttons.pill("BANNED", new Color(0xFDEAEA), Theme.WARN));
         } else if (isMember) {
             right.add(Buttons.pill("JOINED", Theme.SKY_DIM, Theme.SKY));
-            if (mode == Mode.LECTURER && canViewStats) {
+            if (canViewStats) {
                 JButton stats = Buttons.secondary("Statistics");
-                stats.addActionListener(e -> new GroupStatisticsDialog(SwingUtilities.getWindowAncestor(this), ctx, groupId).setVisible(true));
+                stats.addActionListener(e -> onViewStatistics.accept(groupId));
                 JButton gradebook = Buttons.secondary("Gradebook");
-                gradebook.addActionListener(e -> new GradebookDialog(SwingUtilities.getWindowAncestor(this), ctx, groupId).setVisible(true));
+                gradebook.addActionListener(e -> onViewGradebook.accept(groupId));
                 right.add(stats);
                 right.add(gradebook);
             }
             JButton open = Buttons.secondary("Open");
             open.addActionListener(e -> onOpenGroup.accept(groupId));
             right.add(open);
-        } else {
+        }else {
             JButton join = Buttons.primary("Join");
             join.addActionListener(e -> join(groupId));
             right.add(join);
