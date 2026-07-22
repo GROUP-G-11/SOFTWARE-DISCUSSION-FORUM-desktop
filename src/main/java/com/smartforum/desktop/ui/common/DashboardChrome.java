@@ -35,6 +35,7 @@ public class DashboardChrome extends JPanel {
     private final JPanel contentArea = new JPanel(cardLayout);
     private final Map<String, JPanel> navRows = new LinkedHashMap<>();
     private final Map<String, JLabel> navLabels = new LinkedHashMap<>();
+    private final Map<String, JLabel> navBadges = new LinkedHashMap<>();
     private final StatusBar statusBar = new StatusBar();
     private final JLabel welcomeLabel = new JLabel();
     private String activeKey;
@@ -154,9 +155,32 @@ public class DashboardChrome extends JPanel {
         label.setFont(Theme.NAV_FONT);
         label.setForeground(Theme.PAPER);
 
+        JLabel badge = new JLabel("", SwingConstants.CENTER) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(new Color(0xDC3545)); // matches web's Laravel Alert Red
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        badge.setFont(new Font("SansSerif", Font.BOLD, 11));
+        badge.setForeground(Color.WHITE);
+        badge.setPreferredSize(new Dimension(26, 18));
+        badge.setOpaque(false);
+        badge.setVisible(false); // hidden until setBadgeCount() gives it a count > 0
+
+        JPanel center = new JPanel(new BorderLayout(8, 0));
+        center.setOpaque(false);
+        center.add(label, BorderLayout.CENTER);
+        center.add(badge, BorderLayout.EAST);
+
         row.add(icon, BorderLayout.WEST);
-        row.add(label, BorderLayout.CENTER);
+        row.add(center, BorderLayout.CENTER);
         navLabels.put(item.key(), label);
+        navBadges.put(item.key(), badge);
         return row;
     }
 
@@ -237,6 +261,20 @@ public class DashboardChrome extends JPanel {
         if (callback != null) {
             callback.run();
         }
+    }
+
+    /** Shows/updates a small red count badge on a sidebar nav item (e.g. unread notifications). Hides it when count <= 0. */
+    public void setBadgeCount(String key, int count) {
+        JLabel badge = navBadges.get(key);
+        if (badge == null) return;
+        if (count <= 0) {
+            badge.setVisible(false);
+        } else {
+            badge.setText(count > 9 ? "9+" : String.valueOf(count));
+            badge.setVisible(true);
+        }
+        badge.revalidate();
+        badge.repaint();
     }
 
     public String activePanel() {

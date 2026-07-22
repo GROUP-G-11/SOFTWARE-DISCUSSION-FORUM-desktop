@@ -345,6 +345,10 @@ public class ApiClient {
         return postJson("/posts/" + postId + "/share", new JSONObject().put("platform", platform));
     }
 
+    public JSONObject shareReply(long replyId, String platform) throws ApiException, ApiOfflineException {
+        return postJson("/replies/" + replyId + "/share", new JSONObject().put("platform", platform));
+    }
+
 
     // ------------------------------------------------------------------
     // 5.10 Notifications
@@ -354,8 +358,8 @@ public class ApiClient {
         return getJson("/notifications");
     }
 
-    public int unreadNotificationCount() throws ApiException, ApiOfflineException {
-        return getJson("/notifications/unread-count").optInt("count", 0);
+   public int unreadNotificationCount() throws ApiException, ApiOfflineException {
+        return getJson("/notifications/unread-count").optInt("unread_count", 0);
     }
 
     public JSONObject markNotificationRead(long notificationId) throws ApiException, ApiOfflineException {

@@ -56,6 +56,33 @@ public class StudentDashboard {
 
         chrome.showPanel("groups");
 
+        pollUnreadNotifications(ctx, chrome);
+
         return chrome;
+    }
+
+    private static void pollUnreadNotifications(AppContext ctx, DashboardChrome chrome) {
+        Runnable check = () -> new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() {
+                try {
+                    return ctx.api.unreadNotificationCount();
+                } catch (Exception e) {
+                    return -1; // offline/error: leave badge as-is rather than flashing to 0
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    int count = get();
+                    if (count >= 0) chrome.setBadgeCount("notifications", count);
+                } catch (Exception ignored) {
+                }
+            }
+        }.execute();
+
+        check.run();
+        new javax.swing.Timer(20000, e -> check.run()).start();
     }
 }

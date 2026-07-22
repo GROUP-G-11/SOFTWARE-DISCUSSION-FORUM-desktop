@@ -9,7 +9,6 @@ import org.json.JSONObject;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.awt.Desktop;
 import java.io.File;
 import java.net.URI;
 import java.util.List;
@@ -292,9 +291,18 @@ public class TopicWorkspacePanel extends JPanel {
             postsBody.add(notice);
             postsBody.add(Box.createVerticalStrut(8));
         }
-        for (int i = posts.length() - 1; i >= 0; i--) {
-            postsBody.add(postCard(posts.getJSONObject(i)));
+       for (int i = posts.length() - 1; i >= 0; i--) {
+            JSONObject post = posts.getJSONObject(i);
+            postsBody.add(postCard(post));
             postsBody.add(Box.createVerticalStrut(8));
+
+            JSONArray replies = post.optJSONArray("replies");
+            if (replies != null) {
+                for (int j = 0; j < replies.length(); j++) {
+                    postsBody.add(replyCard(replies.getJSONObject(j)));
+                    postsBody.add(Box.createVerticalStrut(8));
+                }
+            }
         }
         postsBody.revalidate();
         postsBody.repaint();
@@ -371,6 +379,77 @@ public class TopicWorkspacePanel extends JPanel {
         return row;
     }
 
+    // Replies use their own id space (reply_id, not post_id) and their own
+    // timestamp field (replied_at), and flag through /replies/{id}/flag —
+    // not /posts/{id}/flag — so this is a small variant of postCard()
+    // rather than a straight reuse.
+    private JComponent replyCard(JSONObject reply) {
+        JSONObject author = reply.optJSONObject("author");
+        String authorName = author != null ? author.optString("full_name", "Unknown") : "Unknown";
+        long authorId = author != null ? author.optLong("user_id", -1) : -1;
+        boolean isMine = authorId != -1 && authorId == ctx.session.userId();
+        long replyId = reply.optLong("reply_id", -1);
+        boolean flagged = reply.optBoolean("is_flagged", false);
+
+        CardPanel bubble = new CardPanel();
+        bubble.setLayout(new BoxLayout(bubble, BoxLayout.Y_AXIS));
+        bubble.setBackground(isMine ? Theme.BUBBLE_MINE : Theme.WHITE);
+        bubble.setMaximumSize(new Dimension(420, Integer.MAX_VALUE));
+
+        if (!isMine) {
+            JLabel nameLabel = new JLabel(authorName);
+            nameLabel.setFont(Theme.SMALL_FONT.deriveFont(Font.BOLD));
+            nameLabel.setForeground(Theme.ACCENT_DARK);
+            nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            bubble.add(nameLabel);
+            bubble.add(Box.createVerticalStrut(3));
+        }
+
+        JTextArea content = new JTextArea(reply.optString("content", ""));
+        content.setEditable(false);
+        content.setLineWrap(true);
+        content.setWrapStyleWord(true);
+        content.setOpaque(false);
+        content.setFont(Theme.BODY_FONT);
+        content.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.setBorder(null);
+        content.setMargin(new Insets(0, 0, 0, 0));
+        bubble.add(content);
+
+        JPanel meta = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        meta.setOpaque(false);
+        meta.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JButton shareBtn = Buttons.link("Forward", Theme.ACCENT_DARK);
+        shareBtn.addActionListener(e -> shareReplyMenu(replyId));
+        JButton flagBtn = Buttons.link(flagged ? "Flagged" : "Flag", Theme.WARN);
+        flagBtn.addActionListener(e -> flagReply(replyId));
+
+        JLabel time = new JLabel(reply.optString("replied_at", ""));
+        time.setFont(Theme.SMALL_FONT);
+        time.setForeground(Theme.MUTED);
+
+        meta.add(shareBtn);
+        meta.add(flagBtn);
+        meta.add(time);
+        bubble.add(Box.createVerticalStrut(4));
+        bubble.add(meta);
+
+        // Indented under its parent post, mirroring the web client's
+        // .is-reply connecting-line treatment.
+        JPanel row = new JPanel(new FlowLayout(isMine ? FlowLayout.RIGHT : FlowLayout.LEFT, 0, 0)) {
+            @Override
+            public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setBorder(new EmptyBorder(0, isMine ? 0 : 26, 0, isMine ? 26 : 0));
+        row.add(bubble);
+        return row;
+    }
+
     private void quickReply(long postId) {
         if (postId < 0) return;
         String text = JOptionPane.showInputDialog(this, "Reply:", "Reply", JOptionPane.PLAIN_MESSAGE);
@@ -395,20 +474,64 @@ public class TopicWorkspacePanel extends JPanel {
         }.execute();
     }
 
+   // Values MUST exactly match the server's validation list —
+    // platform => required|in:WhatsApp,Twitter,Facebook,LinkedIn,Clipboard,Other
+    // (SocialShareController::store/storeReply) — anything else is
+    // rejected with a 422 before it ever reaches the database.
+    private static final String[] SHARE_PLATFORMS = {"WhatsApp", "Twitter", "Facebook", "LinkedIn", "Clipboard"};
+
     private void shareMenu(long postId) {
         if (postId < 0) return;
-        String[] options = {"WhatsApp", "X", "LinkedIn", "Copy link"};
         String choice = (String) JOptionPane.showInputDialog(this, "Share to:", "Forward Post",
-                JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+                JOptionPane.PLAIN_MESSAGE, null, SHARE_PLATFORMS, SHARE_PLATFORMS[0]);
         if (choice == null) return;
-        new SwingWorker<Void, Void>() {
+        new SwingWorker<Void, String>() {
             @Override
             protected Void doInBackground() {
                 try {
                     ctx.api.sharePost(postId, choice);
-                } catch (ApiException | ApiOfflineException ignored) {
+                } catch (ApiException e) {
+                    publish(e.getMessage());
+                } catch (ApiOfflineException e) {
+                    publish("You're offline — sharing needs a live connection.");
                 }
                 return null;
+            }
+
+            @Override
+            protected void process(List<String> chunks) {
+                if (!chunks.isEmpty()) {
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this, chunks.get(chunks.size() - 1),
+                            "Couldn't share", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void shareReplyMenu(long replyId) {
+        if (replyId < 0) return;
+        String choice = (String) JOptionPane.showInputDialog(this, "Share to:", "Forward Reply",
+                JOptionPane.PLAIN_MESSAGE, null, SHARE_PLATFORMS, SHARE_PLATFORMS[0]);
+        if (choice == null) return;
+        new SwingWorker<Void, String>() {
+            @Override
+            protected Void doInBackground() {
+                try {
+                    ctx.api.shareReply(replyId, choice);
+                } catch (ApiException e) {
+                    publish(e.getMessage());
+                } catch (ApiOfflineException e) {
+                    publish("You're offline — sharing needs a live connection.");
+                }
+                return null;
+            }
+
+            @Override
+            protected void process(List<String> chunks) {
+                if (!chunks.isEmpty()) {
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this, chunks.get(chunks.size() - 1),
+                            "Couldn't share", JOptionPane.WARNING_MESSAGE);
+                }
             }
         }.execute();
     }
@@ -420,6 +543,25 @@ public class TopicWorkspacePanel extends JPanel {
             protected Void doInBackground() {
                 try {
                     ctx.api.flagPost(postId);
+                } catch (ApiException | ApiOfflineException ignored) {
+                }
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                refreshThread();
+            }
+        }.execute();
+    }
+
+    private void flagReply(long replyId) {
+        if (replyId < 0) return;
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                try {
+                    ctx.api.flagReply(replyId);
                 } catch (ApiException | ApiOfflineException ignored) {
                 }
                 return null;

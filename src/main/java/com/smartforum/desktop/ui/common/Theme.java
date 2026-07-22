@@ -26,9 +26,18 @@ public final class Theme {
     public static final Color SKY_DIM = Color.decode("#e6edf1");
     public static final Color WHITE = Color.WHITE;
     public static final Color MUTED = Color.decode("#64748b");
-    public static final Color BUBBLE_MINE = Color.decode("#dcf3d3");
-    public static final int RADIUS = 6;
+   public static final Color BUBBLE_MINE = Color.decode("#dcf3d3");
+    public static final int RADIUS = 12;
 
+    // Soft shadow used behind cards for a subtle "lifted" look instead of
+    // a flat bordered box.
+    public static final Color SHADOW = new Color(0, 0, 0, 22);
+
+    // Hover tints for buttons — a touch lighter/darker than the base color
+    // so a mouse-over gives real visual feedback instead of just a cursor change.
+    public static final Color ACCENT_HOVER = Color.decode("#3a8570");
+    public static final Color PAPER_DIM_HOVER = Color.decode("#e2ddcd");
+    public static final Color WARN_HOVER = Color.decode("#c5623a");
     // The web client uses a serif display font for headings (Iowan Old
     // Style/Georgia) and the system sans stack for everything else. Swing
     // can't load web fonts, so we fall back to the closest cross-platform
