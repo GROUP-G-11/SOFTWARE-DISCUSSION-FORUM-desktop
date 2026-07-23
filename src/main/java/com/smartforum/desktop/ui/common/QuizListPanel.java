@@ -16,16 +16,16 @@ import java.util.List;
  * Quiz Engine Module (SDD 5.5). Two modes:
  *   - Student (canManage=false): a simple list of quizzes across all their
  *     groups (GET /me/quizzes), with "Begin Quiz" on anything Open.
- *   - Lecturer (canManage=true): matches dashboard/lecturer.blade.php's
- *     #panel-quizzes layout exactly - an inline "Create a new quiz" form
- *     (group picker, title, schedule fields, a dynamic question matrix)
- *     stacked above "Your quizzes" (also GET /me/quizzes, with
- *     Publish/Close/Results). The create form does NOT auto-publish on
- *     submit - QuizController::store already sets status='Scheduled', and
- *     the quiz opens itself at its scheduled time; forcing it to 'Open'
- *     immediately (as an earlier version of this panel did) would let
- *     students attempt it right away regardless of the configured
- *     schedule, which is wrong.
+ *   - Lecturer (canManage=true): an inline "Create a new quiz" form stacked
+ *     above "Your quizzes".
+ *
+ * Visual pass: every field/card here is custom-painted rounded to match
+ * the web client's look (Theme.RADIUS), instead of bare square Swing
+ * components. Outer padding/scroll structure mirrors NotificationsPanel and
+ * RecommendedTopicsPanel exactly (EmptyBorder(28,36,28,36), single
+ * JScrollPane over a BoxLayout body) so scrolling feels the same everywhere.
+ * Button colors: all actions are green (primary) except "Remove", which is
+ * red (danger) since it's destructive.
  */
 public class QuizListPanel extends JPanel {
 
@@ -53,7 +53,7 @@ public class QuizListPanel extends JPanel {
         this.ctx = ctx;
         this.canManage = canManage;
         setLayout(new BorderLayout(0, 16));
-        setBorder(new EmptyBorder(24, 28, 24, 28));
+        setBorder(new EmptyBorder(28, 36, 28, 36));
         setBackground(Theme.WHITE);
 
         JLabel title = new JLabel("Quizzes");
@@ -66,9 +66,7 @@ public class QuizListPanel extends JPanel {
 
         // Same structure as NotificationsPanel/RecommendedTopicsPanel: title
         // fixed in NORTH, everything scrollable lives in ONE JScrollPane in
-        // CENTER. That's what gives those two panels smooth mouse-wheel /
-        // touchpad scrolling - matching it here fixes the "only the
-        // scrollbar works" feel this panel had before.
+        // CENTER, for the same smooth mouse-wheel / touchpad scrolling.
         JPanel body = new JPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
         body.setOpaque(false);
@@ -77,11 +75,12 @@ public class QuizListPanel extends JPanel {
             JComponent createForm = buildCreateForm();
             createForm.setAlignmentX(Component.LEFT_ALIGNMENT);
             body.add(createForm);
+            body.add(Box.createVerticalStrut(20));
 
             JLabel listTitle = new JLabel("Your quizzes");
             listTitle.setFont(Theme.HEADING_FONT_SM);
             listTitle.setForeground(Theme.INK);
-            listTitle.setBorder(new EmptyBorder(20, 0, 10, 0));
+            listTitle.setBorder(new EmptyBorder(0, 0, 10, 0));
             listTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
             body.add(listTitle);
         }
@@ -93,6 +92,8 @@ public class QuizListPanel extends JPanel {
 
         JScrollPane scrollPane = new JScrollPane(body);
         scrollPane.setBorder(null);
+        scrollPane.setOpaque(false);
+        scrollPane.getViewport().setOpaque(false);
         scrollPane.getVerticalScrollBar().setUnitIncrement(12);
 
         add(top, BorderLayout.NORTH);
@@ -100,15 +101,61 @@ public class QuizListPanel extends JPanel {
     }
 
     // ------------------------------------------------------------------
+    // Shared visual helpers - rounded card + rounded field styling
+    // ------------------------------------------------------------------
+
+    /** A custom-painted rounded rect container, optionally with a colored left accent stripe. */
+    private static JPanel roundedPanel(Color bg, Color stripe) {
+        JPanel p = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(bg);
+                g2.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, Theme.RADIUS, Theme.RADIUS);
+                g2.setColor(Theme.LINE);
+                g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, Theme.RADIUS, Theme.RADIUS);
+                if (stripe != null) {
+                    g2.setColor(stripe);
+                    g2.fillRoundRect(0, 0, 6, getHeight() - 1, Theme.RADIUS, Theme.RADIUS);
+                }
+                g2.dispose();
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        p.setOpaque(false);
+        return p;
+    }
+
+    private static void styleField(JTextField f) {
+        f.setFont(Theme.BODY_FONT);
+        f.setBackground(Theme.WHITE);
+        f.setForeground(Theme.INK);
+        f.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.LINE, 1, true),
+                new EmptyBorder(8, 12, 8, 12)));
+    }
+
+    private static void styleCombo(JComboBox<?> c) {
+        c.setFont(Theme.BODY_FONT);
+        c.setBackground(Theme.WHITE);
+        c.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.LINE, 1, true),
+                new EmptyBorder(4, 8, 4, 8)));
+    }
+
+    // ------------------------------------------------------------------
     // Lecturer: inline "Create a new quiz" form
     // ------------------------------------------------------------------
 
     private JComponent buildCreateForm() {
-        JPanel card = new JPanel(new BorderLayout(0, 12));
-        card.setBackground(Theme.PAPER_DIM);
-        card.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 4, 0, 0, Theme.SKY),
-                new EmptyBorder(18, 18, 18, 18)));
+        JPanel card = roundedPanel(Theme.PAPER_DIM, Theme.SKY);
+        card.setLayout(new BorderLayout(0, 14));
+        card.setBorder(new EmptyBorder(20, 28, 20, 20));
 
         JLabel formTitle = new JLabel("Create a new quiz");
         formTitle.setFont(Theme.HEADING_FONT_SM);
@@ -120,6 +167,12 @@ public class QuizListPanel extends JPanel {
         gc.fill = GridBagConstraints.HORIZONTAL;
         gc.insets = new Insets(4, 6, 4, 6);
         gc.gridy = 0;
+
+        styleCombo(targetGroupBox);
+        styleField(titleField);
+        styleField(dateField);
+        styleField(timeField);
+        styleField(durationField);
 
         gc.gridx = 0; gc.weightx = 1;
         metaGrid.add(labeledField("Target Group", targetGroupBox), gc);
@@ -135,12 +188,16 @@ public class QuizListPanel extends JPanel {
         metaGrid.add(labeledField("Duration (minutes)", durationField), gc);
 
         questionMatrix.setLayout(new BoxLayout(questionMatrix, BoxLayout.Y_AXIS));
-        questionMatrix.setBackground(Theme.WHITE);
+        questionMatrix.setOpaque(false);
         JScrollPane matrixScroll = new JScrollPane(questionMatrix);
-        matrixScroll.setBorder(BorderFactory.createLineBorder(Theme.LINE));
-        matrixScroll.setPreferredSize(new Dimension(0, 220));
+        matrixScroll.setBorder(BorderFactory.createLineBorder(Theme.LINE, 1, true));
+        matrixScroll.getViewport().setOpaque(false);
+        matrixScroll.setOpaque(false);
+        matrixScroll.setPreferredSize(new Dimension(0, 240));
+        matrixScroll.getVerticalScrollBar().setUnitIncrement(12);
 
-        JButton addQuestionBtn = Buttons.secondary("+ Add Question");
+        // Green - non-destructive, adds a row.
+        JButton addQuestionBtn = Buttons.primary("+ Add Question");
         addQuestionBtn.addActionListener(e -> addQuestionRow());
 
         JButton createBtn = Buttons.primary("Create & Schedule Quiz");
@@ -148,24 +205,24 @@ public class QuizListPanel extends JPanel {
 
         JPanel actions = new JPanel(new BorderLayout());
         actions.setOpaque(false);
-        actions.setBorder(new EmptyBorder(10, 0, 0, 0));
+        actions.setBorder(new EmptyBorder(12, 0, 0, 0));
         actions.add(addQuestionBtn, BorderLayout.WEST);
         actions.add(createBtn, BorderLayout.EAST);
 
         card.add(formTitle, BorderLayout.NORTH);
-        JPanel body = new JPanel(new BorderLayout(0, 10));
-        body.setOpaque(false);
-        body.add(metaGrid, BorderLayout.NORTH);
-        body.add(matrixScroll, BorderLayout.CENTER);
-        body.add(actions, BorderLayout.SOUTH);
-        card.add(body, BorderLayout.CENTER);
+        JPanel innerBody = new JPanel(new BorderLayout(0, 12));
+        innerBody.setOpaque(false);
+        innerBody.add(metaGrid, BorderLayout.NORTH);
+        innerBody.add(matrixScroll, BorderLayout.CENTER);
+        innerBody.add(actions, BorderLayout.SOUTH);
+        card.add(innerBody, BorderLayout.CENTER);
 
         addQuestionRow();
         return card;
     }
 
     private JPanel labeledField(String label, JComponent field) {
-        JPanel col = new JPanel(new BorderLayout(0, 3));
+        JPanel col = new JPanel(new BorderLayout(0, 5));
         col.setOpaque(false);
         JLabel l = new JLabel(label);
         l.setFont(Theme.SMALL_FONT.deriveFont(Font.BOLD));
@@ -183,18 +240,24 @@ public class QuizListPanel extends JPanel {
         final JTextField optD = new JTextField();
         final JComboBox<String> correct = new JComboBox<>(new String[]{"A", "B", "C", "D"});
         final JTextField marks = new JTextField("1");
-        final JPanel container = new JPanel();
+        final JPanel container = roundedPanel(Theme.WHITE, null);
     }
 
     private void addQuestionRow() {
         QuestionRow row = new QuestionRow();
         row.container.setLayout(new GridBagLayout());
-        row.container.setBackground(Theme.WHITE);
-        row.container.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.LINE), new EmptyBorder(8, 6, 8, 6)));
+        row.container.setBorder(new EmptyBorder(14, 14, 14, 14));
+
+        styleField(row.text);
+        styleField(row.optA);
+        styleField(row.optB);
+        styleField(row.optC);
+        styleField(row.optD);
+        styleField(row.marks);
+        styleCombo(row.correct);
 
         GridBagConstraints gc = new GridBagConstraints();
-        gc.insets = new Insets(2, 4, 2, 4);
+        gc.insets = new Insets(4, 6, 4, 6);
         gc.fill = GridBagConstraints.HORIZONTAL;
         gc.gridy = 0; gc.gridx = 0; gc.gridwidth = 4; gc.weightx = 1;
         row.container.add(labeledField("Question " + (questionRows.size() + 1), row.text), gc);
@@ -209,7 +272,8 @@ public class QuizListPanel extends JPanel {
         gc.gridx = 0; row.container.add(labeledField("Correct", row.correct), gc);
         gc.gridx = 1; row.container.add(labeledField("Marks", row.marks), gc);
 
-        JButton removeBtn = Buttons.secondary("Remove");
+        // Red - destructive action, removes this question row.
+        JButton removeBtn = Buttons.danger("Remove");
         gc.gridx = 3; gc.anchor = GridBagConstraints.EAST;
         row.container.add(removeBtn, gc);
         removeBtn.addActionListener(e -> {
@@ -221,6 +285,7 @@ public class QuizListPanel extends JPanel {
 
         questionRows.add(row);
         questionMatrix.add(row.container);
+        questionMatrix.add(Box.createVerticalStrut(10));
         questionMatrix.revalidate();
         questionMatrix.repaint();
     }
@@ -266,11 +331,6 @@ public class QuizListPanel extends JPanel {
             @Override
             protected Void doInBackground() {
                 try {
-                    // Matches the real submit handler exactly: create only.
-                    // No auto-publish - the quiz is created with status
-                    // 'Scheduled' server-side and opens itself at its
-                    // scheduled time (or the lecturer can Publish it early
-                    // from the list below, same as the web client).
                     ctx.api.createQuiz(group.groupId(), payload);
                 } catch (ApiOfflineException e) {
                     error = "Creating a quiz needs an internet connection.";
@@ -327,7 +387,6 @@ public class QuizListPanel extends JPanel {
             }
 
             @Override
-
             protected void done() {
                 try {
                     render(get());
@@ -379,19 +438,19 @@ public class QuizListPanel extends JPanel {
         quizListBody.removeAll();
         if (quizzes.isEmpty()) {
             JLabel empty = new JLabel(canManage ? "You haven't created any quizzes yet." : "No quizzes yet.");
-            empty.setForeground(Color.GRAY);
+            empty.setForeground(Theme.MUTED);
+            empty.setFont(Theme.BODY_FONT);
+            empty.setBorder(new EmptyBorder(12, 4, 12, 4));
             quizListBody.add(empty);
         }
         int failed = 0;
         for (int i = 0; i < quizzes.length(); i++) {
             try {
                 JSONObject quiz = quizzes.getJSONObject(i);
-                System.out.println("DEBUG quiz row " + i + ": " + quiz.toString(2));
                 quizListBody.add(quizRow(quiz));
-                quizListBody.add(Box.createVerticalStrut(1));
+                quizListBody.add(Box.createVerticalStrut(12));
             } catch (Exception e) {
                 failed++;
-                System.out.println("DEBUG: failed to render quiz row " + i);
                 e.printStackTrace();
             }
         }
@@ -403,47 +462,51 @@ public class QuizListPanel extends JPanel {
         quizListBody.revalidate();
         quizListBody.repaint();
     }
+
     private JComponent quizRow(JSONObject quiz) {
-        JPanel row = new JPanel(new BorderLayout());
-        row.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.LINE), new EmptyBorder(12, 4, 12, 4)));
-        row.setBackground(Theme.WHITE);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
+        String status = quiz.optString("status", "Draft");
+        Color statusColor = switch (status) {
+            case "Open" -> new Color(0x2E7D32);
+            case "Closed" -> Theme.MUTED;
+            case "Scheduled" -> Theme.SKY;
+            default -> Theme.WARN;
+        };
+
+        JPanel row = roundedPanel(Theme.WHITE, statusColor);
+        row.setLayout(new BorderLayout());
+        row.setBorder(new EmptyBorder(14, 20, 14, 16));
 
         JPanel left = new JPanel();
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
-        JLabel title = new JLabel(quiz.optString("title", "Untitled quiz"));
-        title.setFont(Theme.BODY_FONT_BOLD.deriveFont(14f));
-        left.add(title);
+        JLabel titleLbl = new JLabel(quiz.optString("title", "Untitled quiz"));
+        titleLbl.setFont(Theme.BODY_FONT_BOLD.deriveFont(15f));
+        titleLbl.setForeground(Theme.INK);
+        left.add(titleLbl);
+        left.add(Box.createVerticalStrut(3));
 
-        String status = quiz.optString("status", "Draft");
-        Color statusColor = switch (status) {
-            case "Open" -> new Color(0x2E7D32);
-            case "Closed" -> Color.GRAY;
-            case "Scheduled" -> Theme.SKY;
-            default -> Theme.WARN;
-        };
         JLabel statusLabel = new JLabel(status);
-        statusLabel.setFont(Theme.SMALL_FONT);
+        statusLabel.setFont(Theme.SMALL_FONT.deriveFont(Font.BOLD));
         statusLabel.setForeground(statusColor);
         left.add(statusLabel);
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         right.setOpaque(false);
 
         if (canManage) {
             if ("Scheduled".equals(status) || "Draft".equals(status)) {
-                JButton publish = Buttons.secondary("Publish");
+                JButton publish = Buttons.primary("Publish");
                 publish.addActionListener(e -> manage(() -> ctx.api.publishQuiz(quiz.getLong("quiz_id"))));
                 right.add(publish);
             }
             if ("Open".equals(status)) {
-                JButton close = Buttons.secondary("Close");
+                // Green - matches the rest of the action buttons on this row.
+                JButton close = Buttons.primary("Close");
                 close.addActionListener(e -> manage(() -> ctx.api.closeQuiz(quiz.getLong("quiz_id"))));
                 right.add(close);
             }
-            JButton results = Buttons.secondary("Results");
+            // Green - just a view action, nothing destructive.
+            JButton results = Buttons.primary("Results");
             results.addActionListener(e -> showResults(quiz.getLong("quiz_id"), quiz.optString("title")));
             right.add(results);
         } else if ("Open".equals(status)) {
@@ -463,17 +526,25 @@ public class QuizListPanel extends JPanel {
 
     private void manage(ApiCall call) {
         new SwingWorker<Void, Void>() {
+            String error = null;
+
             @Override
             protected Void doInBackground() {
                 try {
                     call.run();
-                } catch (ApiException | ApiOfflineException ignored) {
+                } catch (ApiOfflineException e) {
+                    error = "This action needs an internet connection.";
+                } catch (ApiException e) {
+                    error = e.getMessage();
                 }
                 return null;
             }
 
             @Override
             protected void done() {
+                if (error != null) {
+                    JOptionPane.showMessageDialog(QuizListPanel.this, error, "Quiz action failed", JOptionPane.WARNING_MESSAGE);
+                }
                 if (canManage) refreshManaged(); else refreshMine();
             }
         }.execute();
