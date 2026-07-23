@@ -63,7 +63,7 @@ public class DashboardChrome extends JPanel {
                 BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.LINE),
                 new EmptyBorder(16, 26, 16, 26)));
 
-        JLabel brand = new JLabel("\uD83D\uDE80  SMART DISCUSSION FORUM");
+        JLabel brand = new JLabel("\uD83C\uDF93  SMART DISCUSSION FORUM");
         brand.setFont(Theme.BRAND_FONT);
         brand.setForeground(Theme.INK);
 
