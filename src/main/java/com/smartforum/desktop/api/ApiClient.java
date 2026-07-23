@@ -169,48 +169,6 @@ public class ApiClient {
         return baseUrl + "/topics/" + topicId + "/download-pdf";
     }
 
-    /**
-     * Downloads the exported PDF for a topic and returns the raw bytes.
-     *
-     * The endpoint requires the same {@code Authorization: Bearer <token>}
-     * header every other call uses, which a plain "open this URL in the
-     * system browser" approach can't send - the browser has no way to know
-     * the app's session token, so that link 401s (or the OS simply has no
-     * default browser configured, e.g. on a fresh machine or over remote
-     * desktop). Fetching the bytes here, over the same authenticated
-     * HttpClient, and saving them to a local file is what actually works.
-     */
-    public byte[] downloadTopicPdf(long topicId) throws ApiException, ApiOfflineException {
-        String path = "/topics/" + topicId + "/download-pdf";
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + path))
-                .timeout(Duration.ofSeconds(30))
-                .header("Accept", "application/pdf")
-                .GET();
-
-        if (bearerToken != null) {
-            builder.header("Authorization", "Bearer " + bearerToken);
-        }
-
-        HttpResponse<byte[]> response;
-        try {
-            response = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
-        } catch (HttpTimeoutException e) {
-            throw new ApiOfflineException("Request to " + path + " timed out.", e);
-        } catch (IOException | InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ApiOfflineException("Could not reach the server for " + path + ".", e);
-        }
-
-        int status = response.statusCode();
-        if (status >= 200 && status < 300) {
-            return response.body();
-        }
-
-        String message = extractMessage(new String(response.body(), StandardCharsets.UTF_8));
-        throw new ApiException(status, message, null);
-    }
-
     // ------------------------------------------------------------------
     // Posts & replies
     // ------------------------------------------------------------------
@@ -226,16 +184,16 @@ public class ApiClient {
         deleteJson("/posts/" + postId);
     }
 
-    public JSONObject flagPost(long postId) throws ApiException, ApiOfflineException {
-        return postJson("/posts/" + postId + "/flag", new JSONObject());
+    public JSONObject flagPost(long postId, boolean flagged) throws ApiException, ApiOfflineException {
+        return postJson("/posts/" + postId + "/flag", new JSONObject().put("flagged", flagged));
     }
 
     public JSONObject createReply(long postId, String content) throws ApiException, ApiOfflineException {
         return postJson("/posts/" + postId + "/replies", new JSONObject().put("content", content));
     }
 
-    public JSONObject flagReply(long replyId) throws ApiException, ApiOfflineException {
-        return postJson("/replies/" + replyId + "/flag", new JSONObject());
+    public JSONObject flagReply(long replyId, boolean flagged) throws ApiException, ApiOfflineException {
+        return postJson("/replies/" + replyId + "/flag", new JSONObject().put("flagged", flagged));
     }
 
     // ------------------------------------------------------------------
@@ -387,10 +345,6 @@ public class ApiClient {
         return postJson("/posts/" + postId + "/share", new JSONObject().put("platform", platform));
     }
 
-    public JSONObject shareReply(long replyId, String platform) throws ApiException, ApiOfflineException {
-        return postJson("/replies/" + replyId + "/share", new JSONObject().put("platform", platform));
-    }
-
 
     // ------------------------------------------------------------------
     // 5.10 Notifications
@@ -401,7 +355,7 @@ public class ApiClient {
     }
 
     public int unreadNotificationCount() throws ApiException, ApiOfflineException {
-        return getJson("/notifications/unread-count").optInt("unread_count", 0);
+        return getJson("/notifications/unread-count").optInt("count", 0);
     }
 
     public JSONObject markNotificationRead(long notificationId) throws ApiException, ApiOfflineException {
