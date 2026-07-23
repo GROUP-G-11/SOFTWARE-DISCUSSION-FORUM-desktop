@@ -186,6 +186,7 @@ public class TopicWorkspacePanel extends JPanel {
     private final JScrollPane postsScroll = new JScrollPane(postsBody);
     private final JTextArea composer = new JTextArea(1, 30);
     private final JButton excludeBtn = Buttons.secondary("Exclude members");
+    private final JButton exportBtn = Buttons.secondary("Export PDF");
     private final java.util.Set<Long> excludedUserIds = new java.util.HashSet<>();
 
     private JComponent buildThreadView() {
@@ -199,7 +200,6 @@ public class TopicWorkspacePanel extends JPanel {
         threadTitle.setFont(Theme.HEADING_FONT);
         threadTitle.setForeground(Theme.INK);
 
-        JButton exportBtn = Buttons.secondary("Export PDF");
         exportBtn.addActionListener(e -> exportPdf());
 
         JPanel top = new JPanel(new BorderLayout());
@@ -302,7 +302,7 @@ public class TopicWorkspacePanel extends JPanel {
             postsBody.add(notice);
             postsBody.add(Box.createVerticalStrut(8));
         }
-       for (int i = posts.length() - 1; i >= 0; i--) {
+        for (int i = posts.length() - 1; i >= 0; i--) {
             JSONObject post = posts.getJSONObject(i);
             postsBody.add(postCard(post));
             postsBody.add(Box.createVerticalStrut(8));
@@ -485,7 +485,7 @@ public class TopicWorkspacePanel extends JPanel {
         }.execute();
     }
 
-   // Values MUST exactly match the server's validation list —
+    // Values MUST exactly match the server's validation list —
     // platform => required|in:WhatsApp,Twitter,Facebook,LinkedIn,Clipboard,Other
     // (SocialShareController::store/storeReply) — anything else is
     // rejected with a 422 before it ever reaches the database.
@@ -781,15 +781,61 @@ public class TopicWorkspacePanel extends JPanel {
 
     private void exportPdf() {
         long topicId = currentTopicId;
-        String url = ctx.api.downloadTopicPdfUrl(topicId);
-        try {
-            if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().browse(new URI(url + "?token=" + ctx.api.getBearerToken()));
+        String topicTitle = threadTitle.getText();
+
+        exportBtnSetEnabled(false);
+        new SwingWorker<File, Void>() {
+            @Override
+            protected File doInBackground() throws Exception {
+                byte[] pdfBytes = ctx.api.downloadTopicPdf(topicId);
+
+                File dir = com.smartforum.desktop.util.AppConfig.exportsDir().toFile();
+                if (!dir.exists()) dir.mkdirs();
+
+                String safeTitle = topicTitle == null ? "topic" : topicTitle.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+                if (safeTitle.isEmpty()) safeTitle = "topic";
+                File file = new File(dir, safeTitle + "-" + topicId + ".pdf");
+                java.nio.file.Files.write(file.toPath(), pdfBytes);
+
+                ctx.store.recordCachedFile("topic_pdf", topicId, file.getName(), file.getAbsolutePath());
+                return file;
             }
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this,
-                    "Couldn't open the export link. You can also download it directly from:\n" + url,
-                    "Export PDF", JOptionPane.INFORMATION_MESSAGE);
-        }
+
+            @Override
+            protected void done() {
+                exportBtnSetEnabled(true);
+                try {
+                    File file = get();
+                    boolean opened = false;
+                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+                        try {
+                            Desktop.getDesktop().open(file);
+                            opened = true;
+                        } catch (Exception ignored) {
+                            // Fall through to the "here's the path" dialog below.
+                        }
+                    }
+                    if (!opened) {
+                        JOptionPane.showMessageDialog(TopicWorkspacePanel.this,
+                                "PDF exported. No default PDF viewer is available to open it automatically, " +
+                                        "but you can find it at:\n" + file.getAbsolutePath(),
+                                "Export PDF", JOptionPane.INFORMATION_MESSAGE);
+                    }
+                } catch (Exception e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    String message = cause instanceof ApiOfflineException
+                            ? "Couldn't reach the server to export this topic. Check your connection and try again."
+                            : cause instanceof ApiException
+                              ? "Export failed: " + cause.getMessage()
+                              : "Couldn't export the PDF: " + cause.getMessage();
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this, message,
+                            "Export PDF", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void exportBtnSetEnabled(boolean enabled) {
+        if (exportBtn != null) exportBtn.setEnabled(enabled);
     }
 }

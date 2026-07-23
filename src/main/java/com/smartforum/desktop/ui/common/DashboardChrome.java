@@ -151,6 +151,7 @@ public class DashboardChrome extends JPanel {
 
         JLabel icon = new JLabel(item.icon());
         icon.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 18));
+        icon.setForeground(iconColorFor(item.icon()));
         JLabel label = new JLabel(item.label());
         label.setFont(Theme.NAV_FONT);
         label.setForeground(Theme.PAPER);
@@ -182,6 +183,20 @@ public class DashboardChrome extends JPanel {
         navLabels.put(item.key(), label);
         navBadges.put(item.key(), badge);
         return row;
+    }
+
+    /**
+     * Quizzes, Recommended, and Notifications get their own accent color so
+     * they stand out from the rest of the nav; every other icon keeps the
+     * default light paper tone.
+     */
+    private static Color iconColorFor(String icon) {
+        return switch (icon) {
+            case "\uD83D\uDCDD" -> new Color(0xF0C36D); // 📝 Quizzes - gold
+            case "\u2728" -> new Color(0x2DD4BF);       // ✨ Recommended - teal
+            case "\uD83D\uDD14" -> new Color(0xDC3545); // 🔔 Notifications - red
+            default -> Theme.PAPER;
+        };
     }
 
     private JComponent buildUserFooter(AppContext ctx, Runnable onLogout) {
