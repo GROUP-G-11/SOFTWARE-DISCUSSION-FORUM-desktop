@@ -7,16 +7,15 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLConnection;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
-import java.time.Duration;
-import java.util.Map;
-
-import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Duration;
+import java.util.Map;
 
 /**
  * Thin REST wrapper around the Laravel backend (see routes/api.php on the
@@ -88,12 +87,13 @@ public class ApiClient {
         JSONObject body = new JSONObject(fields);
         return patchJson("/me", body);
     }
+
     public JSONObject uploadAvatar(File file) throws ApiException, ApiOfflineException {
         return new JSONObject(multipartPost("/me/avatar", "avatar", file));
     }
 
     // ------------------------------------------------------------------
-    // Role Management (Administrator only) - SDD Table 30
+    // Role Management (Administrator only)
     // ------------------------------------------------------------------
 
     public JSONObject listUsers(String search) throws ApiException, ApiOfflineException {
@@ -183,12 +183,20 @@ public class ApiClient {
         return postJson("/topics/" + topicId + "/posts", body);
     }
 
+    public JSONObject createPost(long topicId, String content, String attachmentUrl, long[] excludeUserIds) throws ApiException, ApiOfflineException {
+        return createPost(topicId, content, attachmentUrl, excludeUserIds, null);
+    }
+
     public void deletePost(long postId) throws ApiException, ApiOfflineException {
         deleteJson("/posts/" + postId);
     }
 
     public JSONObject flagPost(long postId, boolean flagged) throws ApiException, ApiOfflineException {
         return postJson("/posts/" + postId + "/flag", new JSONObject().put("flagged", flagged));
+    }
+
+    public JSONObject createReply(long postId, String content) throws ApiException, ApiOfflineException {
+        return createReply(postId, content, null);
     }
 
     public JSONObject createReply(long postId, String content, String clientRef) throws ApiException, ApiOfflineException {
@@ -233,11 +241,6 @@ public class ApiClient {
     // 5.4 Messaging and Synchronization
     // ------------------------------------------------------------------
 
-    /**
-     * Push queued offline actions (if any) and pull everything new since
-     * lastSyncedAt. Mirrors SyncController::sync() exactly: same field
-     * names, same response shape.
-     */
     public JSONObject sync(String lastSyncedAtIso, JSONArray queuedActions) throws ApiException, ApiOfflineException {
         JSONObject body = new JSONObject().put("device_type", "Desktop");
         if (lastSyncedAtIso != null) body.put("last_synced_at", lastSyncedAtIso);
@@ -349,11 +352,10 @@ public class ApiClient {
     public JSONObject sharePost(long postId, String platform) throws ApiException, ApiOfflineException {
         return postJson("/posts/" + postId + "/share", new JSONObject().put("platform", platform));
     }
-    
+
     public JSONObject shareReply(long replyId, String platform) throws ApiException, ApiOfflineException {
         return postJson("/replies/" + replyId + "/share", new JSONObject().put("platform", platform));
     }
-
 
     // ------------------------------------------------------------------
     // 5.10 Notifications
@@ -385,9 +387,6 @@ public class ApiClient {
 
     private JSONArray getJsonArray(String path) throws ApiException, ApiOfflineException {
         String raw = request("GET", path, null);
-        // Some list endpoints return a bare array, others a Laravel
-        // paginator object with a "data" array - handle both so callers
-        // don't each need their own guard.
         String trimmed = raw.trim();
         if (trimmed.startsWith("[")) {
             return new JSONArray(trimmed);
@@ -459,7 +458,6 @@ public class ApiClient {
             if (obj.has("message")) return obj.getString("message");
             if (obj.has("errors")) return obj.getJSONObject("errors").toString();
         } catch (Exception ignored) {
-            // Body wasn't JSON (e.g. an HTML error page) - fall through.
         }
         return body == null || body.isBlank() ? "Request failed." : body;
     }
