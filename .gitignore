@@ -5,3 +5,25 @@ target/
 out/
 *.class
 .DS_Store
+# Maven build directory
+target/
+*.jar
+*.war
+
+# Maven Shade Plugin temporary POM
+dependency-reduced-pom.xml
+
+# Runtime configuration (keep template, ignore actual secrets)
+src/main/resources/config.properties
+!src/main/resources/config.properties.example
+
+# IDE files
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db

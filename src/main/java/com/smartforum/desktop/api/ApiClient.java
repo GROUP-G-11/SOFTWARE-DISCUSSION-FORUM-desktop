@@ -344,6 +344,10 @@ public class ApiClient {
     public JSONObject sharePost(long postId, String platform) throws ApiException, ApiOfflineException {
         return postJson("/posts/" + postId + "/share", new JSONObject().put("platform", platform));
     }
+    
+    public JSONObject shareReply(long replyId, String platform) throws ApiException, ApiOfflineException {
+        return postJson("/replies/" + replyId + "/share", new JSONObject().put("platform", platform));
+    }
 
 
     // ------------------------------------------------------------------
