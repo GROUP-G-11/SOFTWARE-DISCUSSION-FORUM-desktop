@@ -153,8 +153,10 @@ public class ApiClient {
         return getJsonArray("/groups/" + groupId + "/topics/categories");
     }
 
-    public JSONObject createTopic(long groupId, String title) throws ApiException, ApiOfflineException {
-        return postJson("/groups/" + groupId + "/topics", new JSONObject().put("title", title));
+    public JSONObject createTopic(long groupId, String title, String clientRef) throws ApiException, ApiOfflineException {
+        JSONObject body = new JSONObject().put("title", title);
+        if (clientRef != null) body.put("client_ref", clientRef);
+        return postJson("/groups/" + groupId + "/topics", body);
     }
 
     public JSONObject getTopic(long topicId) throws ApiException, ApiOfflineException {
@@ -169,14 +171,57 @@ public class ApiClient {
         return baseUrl + "/topics/" + topicId + "/download-pdf";
     }
 
+    /**
+     * Downloads the exported PDF for a topic and returns the raw bytes.
+     *
+     * The endpoint requires the same {@code Authorization: Bearer <token>}
+     * header every other call uses, which a plain "open this URL in the
+     * system browser" approach can't send - the browser has no way to know
+     * the app's session token, so that link 401s (or the OS simply has no
+     * default browser configured, e.g. on a fresh machine or over remote
+     * desktop). Fetching the bytes here, over the same authenticated
+     * HttpClient, and saving them to a local file is what actually works.
+     */
+    public byte[] downloadTopicPdf(long topicId) throws ApiException, ApiOfflineException {
+        String path = "/topics/" + topicId + "/download-pdf";
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + path))
+                .timeout(Duration.ofSeconds(30))
+                .header("Accept", "application/pdf")
+                .GET();
+
+        if (bearerToken != null) {
+            builder.header("Authorization", "Bearer " + bearerToken);
+        }
+
+        HttpResponse<byte[]> response;
+        try {
+            response = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+        } catch (HttpTimeoutException e) {
+            throw new ApiOfflineException("Request to " + path + " timed out.", e);
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ApiOfflineException("Could not reach the server for " + path + ".", e);
+        }
+
+        int status = response.statusCode();
+        if (status >= 200 && status < 300) {
+            return response.body();
+        }
+
+        String message = extractMessage(new String(response.body(), StandardCharsets.UTF_8));
+        throw new ApiException(status, message, null);
+    }
+
     // ------------------------------------------------------------------
     // Posts & replies
     // ------------------------------------------------------------------
 
-    public JSONObject createPost(long topicId, String content, String attachmentUrl, long[] excludeUserIds) throws ApiException, ApiOfflineException {
+    public JSONObject createPost(long topicId, String content, String attachmentUrl, long[] excludeUserIds, String clientRef) throws ApiException, ApiOfflineException {
         JSONObject body = new JSONObject().put("content", content);
         if (attachmentUrl != null) body.put("attachment_url", attachmentUrl);
         if (excludeUserIds != null && excludeUserIds.length > 0) body.put("exclude_user_ids", excludeUserIds);
+        if (clientRef != null) body.put("client_ref", clientRef);
         return postJson("/topics/" + topicId + "/posts", body);
     }
 
@@ -188,8 +233,10 @@ public class ApiClient {
         return postJson("/posts/" + postId + "/flag", new JSONObject());
     }
 
-    public JSONObject createReply(long postId, String content) throws ApiException, ApiOfflineException {
-        return postJson("/posts/" + postId + "/replies", new JSONObject().put("content", content));
+    public JSONObject createReply(long postId, String content, String clientRef) throws ApiException, ApiOfflineException {
+        JSONObject body = new JSONObject().put("content", content);
+        if (clientRef != null) body.put("client_ref", clientRef);
+        return postJson("/posts/" + postId + "/replies", body);
     }
 
     public JSONObject flagReply(long replyId) throws ApiException, ApiOfflineException {
@@ -358,7 +405,7 @@ public class ApiClient {
         return getJson("/notifications");
     }
 
-   public int unreadNotificationCount() throws ApiException, ApiOfflineException {
+    public int unreadNotificationCount() throws ApiException, ApiOfflineException {
         return getJson("/notifications/unread-count").optInt("unread_count", 0);
     }
 

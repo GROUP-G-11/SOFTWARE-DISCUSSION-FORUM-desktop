@@ -54,4 +54,9 @@ public final class AppConfig {
     public static String dbFile() {
         return System.getProperty("sdf.db.file", PROPS.getProperty("db.file"));
     }
+
+    /** Where downloaded exports (e.g. topic PDFs) are saved, next to the local cache DB. */
+    public static Path exportsDir() {
+        return Path.of(System.getProperty("user.home"), ".smart-discussion-forum", "exports");
+    }
 }

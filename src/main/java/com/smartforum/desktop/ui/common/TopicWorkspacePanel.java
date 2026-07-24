@@ -28,6 +28,7 @@ public class TopicWorkspacePanel extends JPanel {
     private long currentGroupId = -1;
     private long currentTopicId = -1;
     private String currentGroupName = "Group";
+    private String currentView = "list";
 
     public TopicWorkspacePanel(AppContext ctx) {
         this.ctx = ctx;
@@ -37,12 +38,29 @@ public class TopicWorkspacePanel extends JPanel {
 
         innerHost.add(buildTopicListView(), "list");
         innerHost.add(buildThreadView(), "thread");
+
+        // A background sync cycle can bring in new posts (or resolve queued
+        // topics/posts/replies) for whatever this panel happens to be
+        // showing right now. Without this, "sync succeeded" and "what's on
+        // screen" can drift apart until the user manually navigates away
+        // and back - refresh the visible view whenever that happens.
+        ctx.sync.setOnSyncComplete(result -> {
+            if (!result.success()) return;
+            SwingUtilities.invokeLater(() -> {
+                if ("thread".equals(currentView) && currentTopicId > 0) {
+                    refreshThread();
+                } else if ("list".equals(currentView) && currentGroupId > 0) {
+                    refreshTopicList();
+                }
+            });
+        });
     }
 
     public void openGroup(long groupId, String groupName) {
         this.currentGroupId = groupId;
         this.currentGroupName = groupName == null ? "Group" : groupName;
         groupTitle.setText(groupName == null ? "Topics" : groupName + " \u2014 Topics");
+        this.currentView = "list";
         inner.show(innerHost, "list");
         refreshTopicList();
     }
@@ -152,11 +170,15 @@ public class TopicWorkspacePanel extends JPanel {
         JPanel left = new JPanel();
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
-        JLabel title = new JLabel(topic.optString("title", "Untitled topic"));
+        String syncStatus = topic.optString("sync_status", "");
+        JLabel title = new JLabel(topic.optString("title", "Untitled topic") + ("pending".equals(syncStatus) ? "  (sending\u2026)" : "failed".equals(syncStatus) ? "  (failed to send)" : ""));
         title.setFont(Theme.BODY_FONT_BOLD.deriveFont(14f));
-        JLabel meta = new JLabel(topic.optInt("posts_count", 0) + " replies" + (topic.has("category") && !topic.isNull("category") ? "  \u00b7  " + topic.optString("category") : ""));
+        String metaText = "failed".equals(syncStatus)
+                ? "Will retry once you're back online" + (topic.optString("sync_error", "").isBlank() ? "" : ": " + topic.optString("sync_error", ""))
+                : topic.optInt("posts_count", 0) + " replies" + (topic.has("category") && !topic.isNull("category") ? "  \u00b7  " + topic.optString("category") : "");
+        JLabel meta = new JLabel(metaText);
         meta.setFont(Theme.SMALL_FONT);
-        meta.setForeground(Color.GRAY);
+        meta.setForeground("failed".equals(syncStatus) ? Theme.WARN : Color.GRAY);
         left.add(title);
         left.add(meta);
 
@@ -186,6 +208,8 @@ public class TopicWorkspacePanel extends JPanel {
     private final JScrollPane postsScroll = new JScrollPane(postsBody);
     private final JTextArea composer = new JTextArea(1, 30);
     private final JButton excludeBtn = Buttons.secondary("Exclude members");
+    private final JButton exportBtn = Buttons.secondary("Export PDF");
+    private final JButton sendBtn = Buttons.primary("Send");
     private final java.util.Set<Long> excludedUserIds = new java.util.HashSet<>();
 
     private JComponent buildThreadView() {
@@ -194,12 +218,14 @@ public class TopicWorkspacePanel extends JPanel {
         wrap.setBackground(Theme.WHITE);
 
         JButton back = Buttons.secondary("\u2190 Back to topics");
-        back.addActionListener(e -> inner.show(innerHost, "list"));
+        back.addActionListener(e -> {
+            currentView = "list";
+            inner.show(innerHost, "list");
+        });
 
         threadTitle.setFont(Theme.HEADING_FONT);
         threadTitle.setForeground(Theme.INK);
 
-        JButton exportBtn = Buttons.secondary("Export PDF");
         exportBtn.addActionListener(e -> exportPdf());
 
         JPanel top = new JPanel(new BorderLayout());
@@ -234,7 +260,6 @@ public class TopicWorkspacePanel extends JPanel {
 
         excludeBtn.addActionListener(e -> showExcludeDialog());
 
-        JButton sendBtn = Buttons.primary("Send");
         sendBtn.addActionListener(e -> sendPost());
 
         JPanel composeActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -256,6 +281,7 @@ public class TopicWorkspacePanel extends JPanel {
 
     private void openTopic(long topicId, String title) {
         this.currentTopicId = topicId;
+        this.currentView = "thread";
         threadTitle.setText(title);
         excludedUserIds.clear();
         inner.show(innerHost, "thread");
@@ -266,6 +292,7 @@ public class TopicWorkspacePanel extends JPanel {
         long topicId = currentTopicId;
         new SwingWorker<JSONArray, Void>() {
             boolean fromCache = false;
+            boolean serverError = false; // server reachable but errored, vs. no network at all
 
             @Override
             protected JSONArray doInBackground() {
@@ -275,25 +302,50 @@ public class TopicWorkspacePanel extends JPanel {
                     JSONArray posts = data != null ? data : response.optJSONArray("posts", new JSONArray());
                     ctx.store.cachePosts(topicId, posts);
                     return posts;
-                } catch (ApiOfflineException | ApiException e) {
+                } catch (ApiOfflineException e) {
                     fromCache = true;
                     JSONArray arr = new JSONArray();
                     ctx.store.cachedPosts(topicId).forEach(arr::put);
                     return arr;
+                } catch (ApiException e) {
+                    // Server reachable but errored - don't touch the UI with a
+                    // partial/empty result, leave what's on screen alone.
+                    serverError = true;
+                    return null;
                 }
             }
 
             @Override
             protected void done() {
                 try {
-                    renderThread(get(), fromCache);
+                    JSONArray posts = get();
+                    if (serverError) {
+                        showTransientNotice("Couldn't refresh this thread \u2013 server error. Still showing what was last loaded.");
+                        return;
+                    }
+                    renderThread(posts, fromCache);
                 } catch (Exception ignored) {
                 }
             }
         }.execute();
     }
 
-    private void renderThread(JSONArray posts, boolean fromCache) {
+    private void showTransientNotice(String text) {
+        JLabel notice = new JLabel(text);
+        notice.setForeground(Theme.WARN);
+        notice.setFont(Theme.SMALL_FONT);
+        postsBody.add(notice, 0);
+        postsBody.revalidate();
+        postsBody.repaint();
+        javax.swing.Timer t = new javax.swing.Timer(4000, e -> {
+            postsBody.remove(notice);
+            postsBody.revalidate();
+            postsBody.repaint();
+        });
+        t.setRepeats(false);
+        t.start();
+    }
+     private void renderThread(JSONArray posts, boolean fromCache) {
         postsBody.removeAll();
         if (fromCache) {
             JLabel notice = new JLabel("Offline \u2013 showing this thread's last synced posts. New posts you send now will queue and go out once you're back online.");
@@ -302,7 +354,7 @@ public class TopicWorkspacePanel extends JPanel {
             postsBody.add(notice);
             postsBody.add(Box.createVerticalStrut(8));
         }
-       for (int i = posts.length() - 1; i >= 0; i--) {
+        for (int i = posts.length() - 1; i >= 0; i--) {
             JSONObject post = posts.getJSONObject(i);
             postsBody.add(postCard(post));
             postsBody.add(Box.createVerticalStrut(8));
@@ -330,10 +382,12 @@ public class TopicWorkspacePanel extends JPanel {
         long authorId = author != null ? author.optLong("user_id", -1) : -1;
         boolean isMine = authorId != -1 && authorId == ctx.session.userId();
         long postId = post.optLong("post_id", -1);
+        String syncStatus = post.optString("sync_status", "");
+        boolean localOnly = postId < 0 || !syncStatus.isBlank();
 
         CardPanel bubble = new CardPanel();
         bubble.setLayout(new BoxLayout(bubble, BoxLayout.Y_AXIS));
-        bubble.setBackground(isMine ? Theme.BUBBLE_MINE : Theme.WHITE);
+        bubble.setBackground("failed".equals(syncStatus) ? new Color(0xFDECEA) : isMine ? Theme.BUBBLE_MINE : Theme.WHITE);
         bubble.setMaximumSize(new Dimension(440, Integer.MAX_VALUE));
 
         if (!isMine) {
@@ -371,12 +425,15 @@ public class TopicWorkspacePanel extends JPanel {
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(Theme.MUTED);
 
-        meta.add(replyBtn);
-        meta.add(shareBtn);
-        meta.add(flagBtn);
-        meta.add(time);
+        if (!localOnly) {
+            meta.add(replyBtn);
+            meta.add(shareBtn);
+            meta.add(flagBtn);
+            meta.add(time);
+        }
         bubble.add(Box.createVerticalStrut(4));
         bubble.add(meta);
+        addSyncStatus(bubble, syncStatus, post.optString("sync_error", ""));
 
         JPanel row = new JPanel(new FlowLayout(isMine ? FlowLayout.RIGHT : FlowLayout.LEFT, 0, 0)) {
             @Override
@@ -401,10 +458,12 @@ public class TopicWorkspacePanel extends JPanel {
         boolean isMine = authorId != -1 && authorId == ctx.session.userId();
         long replyId = reply.optLong("reply_id", -1);
         boolean flagged = reply.optBoolean("is_flagged", false);
+        String syncStatus = reply.optString("sync_status", "");
+        boolean localOnly = replyId < 0 || !syncStatus.isBlank();
 
         CardPanel bubble = new CardPanel();
         bubble.setLayout(new BoxLayout(bubble, BoxLayout.Y_AXIS));
-        bubble.setBackground(isMine ? Theme.BUBBLE_MINE : Theme.WHITE);
+        bubble.setBackground("failed".equals(syncStatus) ? new Color(0xFDECEA) : isMine ? Theme.BUBBLE_MINE : Theme.WHITE);
         bubble.setMaximumSize(new Dimension(420, Integer.MAX_VALUE));
 
         if (!isMine) {
@@ -440,11 +499,14 @@ public class TopicWorkspacePanel extends JPanel {
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(Theme.MUTED);
 
-        meta.add(shareBtn);
-        meta.add(flagBtn);
-        meta.add(time);
+        if (!localOnly) {
+            meta.add(shareBtn);
+            meta.add(flagBtn);
+            meta.add(time);
+        }
         bubble.add(Box.createVerticalStrut(4));
         bubble.add(meta);
+        addSyncStatus(bubble, syncStatus, reply.optString("sync_error", ""));
 
         // Indented under its parent post, mirroring the web client's
         // .is-reply connecting-line treatment.
@@ -465,30 +527,53 @@ public class TopicWorkspacePanel extends JPanel {
         if (postId < 0) return;
         String text = JOptionPane.showInputDialog(this, "Reply:", "Reply", JOptionPane.PLAIN_MESSAGE);
         if (text == null || text.isBlank()) return;
+        String clientRef = java.util.UUID.randomUUID().toString();
         new SwingWorker<Void, Void>() {
+            String errorMessage = null;
+
             @Override
             protected Void doInBackground() {
                 try {
-                    ctx.api.createReply(postId, text.trim());
+                    ctx.api.createReply(postId, text.trim(), clientRef);
                 } catch (ApiOfflineException e) {
-                    JSONObject payload = new JSONObject().put("post_id", postId).put("content", text.trim());
-                    ctx.store.queueOutboxAction("create_reply", payload);
-                } catch (ApiException ignored) {
+                    JSONObject payload = new JSONObject().put("post_id", postId).put("content", text.trim()).put("client_ref", clientRef);
+                    long outboxId = ctx.store.queueOutboxAction("create_reply", payload);
+                    ctx.store.cachePendingReply(postId, outboxId, payload, ctx.session.user());
+                } catch (ApiException e) {
+                    errorMessage = e.getMessage();
                 }
                 return null;
             }
 
             @Override
             protected void done() {
+                if (errorMessage != null) {
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this,
+                            "Reply could not be sent: " + errorMessage,
+                            "Send failed", JOptionPane.ERROR_MESSAGE);
+                }
                 refreshThread();
             }
         }.execute();
     }
 
-   // Values MUST exactly match the server's validation list —
+    // Values MUST exactly match the server's validation list —
     // platform => required|in:WhatsApp,Twitter,Facebook,LinkedIn,Clipboard,Other
     // (SocialShareController::store/storeReply) — anything else is
     // rejected with a 422 before it ever reaches the database.
+    private void addSyncStatus(JPanel bubble, String syncStatus, String syncError) {
+        if (syncStatus == null || syncStatus.isBlank()) return;
+        String text = "failed".equals(syncStatus)
+                ? "Failed to sync" + (syncError == null || syncError.isBlank() ? "" : ": " + syncError)
+                : "Pending";
+        JLabel status = new JLabel(text);
+        status.setFont(Theme.SMALL_FONT);
+        status.setForeground(Theme.WARN); // red for both pending and failed
+        status.setAlignmentX(Component.LEFT_ALIGNMENT);
+        bubble.add(Box.createVerticalStrut(4));
+        bubble.add(status);
+    }
+
     private static final String[] SHARE_PLATFORMS = {"WhatsApp", "Twitter", "Facebook", "LinkedIn", "Clipboard"};
 
     private void shareMenu(long postId) {
@@ -746,31 +831,50 @@ public class TopicWorkspacePanel extends JPanel {
     }
 
     private void sendPost() {
+        if (!sendBtn.isEnabled()) return; // already sending this post - ignore a repeat click/keypress
         String text = composer.getText().trim();
         if (text.isBlank()) return;
         long topicId = currentTopicId;
         long[] excludeIds = excludedUserIds.stream().mapToLong(Long::longValue).toArray();
+        // Stamped once, before any network attempt, so the immediate call AND
+        // a later outbox replay of the same compose action always carry the
+        // same ref. Previously a timeout on the first attempt (which does NOT
+        // guarantee the server never received it) would fall back to the
+        // outbox, and replaying that outbox entry could create a second,
+        // separate post server-side - that's what caused messages sent while
+        // offline/flaky to show up twice after syncing.
+        String clientRef = java.util.UUID.randomUUID().toString();
 
+        sendBtn.setEnabled(false);
         new SwingWorker<Boolean, Void>() {
+            String errorMessage = null;
+
             @Override
             protected Boolean doInBackground() {
                 try {
-                    ctx.api.createPost(topicId, text, null, excludeIds);
+                    ctx.api.createPost(topicId, text, null, excludeIds, clientRef);
                     return true;
                 } catch (ApiOfflineException e) {
-                    JSONObject payload = new JSONObject().put("topic_id", topicId).put("content", text);
+                    JSONObject payload = new JSONObject().put("topic_id", topicId).put("content", text).put("client_ref", clientRef);
                     if (excludeIds.length > 0) payload.put("exclude_user_ids", excludeIds);
-                    ctx.store.queueOutboxAction("create_post", payload);
+                    long outboxId = ctx.store.queueOutboxAction("create_post", payload);
+                    ctx.store.cachePendingPost(topicId, outboxId, payload, ctx.session.user());
                     return false;
                 } catch (ApiException e) {
+                    errorMessage = e.getMessage();
                     return null;
                 }
             }
 
-
-
             @Override
             protected void done() {
+                sendBtn.setEnabled(true);
+                if (errorMessage != null) {
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this,
+                            "Post could not be sent: " + errorMessage,
+                            "Send failed", JOptionPane.ERROR_MESSAGE);
+                    return; // keep composer text so the user can retry/edit instead of losing it
+                }
                 composer.setText("");
                 excludedUserIds.clear();
                 excludeBtn.setText("Exclude members");
@@ -781,15 +885,61 @@ public class TopicWorkspacePanel extends JPanel {
 
     private void exportPdf() {
         long topicId = currentTopicId;
-        String url = ctx.api.downloadTopicPdfUrl(topicId);
-        try {
-            if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().browse(new URI(url + "?token=" + ctx.api.getBearerToken()));
+        String topicTitle = threadTitle.getText();
+
+        exportBtnSetEnabled(false);
+        new SwingWorker<File, Void>() {
+            @Override
+            protected File doInBackground() throws Exception {
+                byte[] pdfBytes = ctx.api.downloadTopicPdf(topicId);
+
+                File dir = com.smartforum.desktop.util.AppConfig.exportsDir().toFile();
+                if (!dir.exists()) dir.mkdirs();
+
+                String safeTitle = topicTitle == null ? "topic" : topicTitle.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+                if (safeTitle.isEmpty()) safeTitle = "topic";
+                File file = new File(dir, safeTitle + "-" + topicId + ".pdf");
+                java.nio.file.Files.write(file.toPath(), pdfBytes);
+
+                ctx.store.recordCachedFile("topic_pdf", topicId, file.getName(), file.getAbsolutePath());
+                return file;
             }
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this,
-                    "Couldn't open the export link. You can also download it directly from:\n" + url,
-                    "Export PDF", JOptionPane.INFORMATION_MESSAGE);
-        }
+
+            @Override
+            protected void done() {
+                exportBtnSetEnabled(true);
+                try {
+                    File file = get();
+                    boolean opened = false;
+                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+                        try {
+                            Desktop.getDesktop().open(file);
+                            opened = true;
+                        } catch (Exception ignored) {
+                            // Fall through to the "here's the path" dialog below.
+                        }
+                    }
+                    if (!opened) {
+                        JOptionPane.showMessageDialog(TopicWorkspacePanel.this,
+                                "PDF exported. No default PDF viewer is available to open it automatically, " +
+                                        "but you can find it at:\n" + file.getAbsolutePath(),
+                                "Export PDF", JOptionPane.INFORMATION_MESSAGE);
+                    }
+                } catch (Exception e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    String message = cause instanceof ApiOfflineException
+                            ? "Couldn't reach the server to export this topic. Check your connection and try again."
+                            : cause instanceof ApiException
+                            ? "Export failed: " + cause.getMessage()
+                            : "Couldn't export the PDF: " + cause.getMessage();
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this, message,
+                            "Export PDF", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void exportBtnSetEnabled(boolean enabled) {
+        if (exportBtn != null) exportBtn.setEnabled(enabled);
     }
 }

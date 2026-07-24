@@ -40,20 +40,26 @@ public class SyncService {
     private java.util.concurrent.ScheduledFuture<?> pollingTask;
 
     private volatile boolean online = true;
-    private Consumer<SyncResult> onSyncComplete;
-    private Consumer<Boolean> onConnectivityChange;
+    // Multiple parts of the UI need to react to a sync cycle finishing (the
+    // sidebar status line, but also whatever topic thread happens to be open
+    // right now) so these are lists rather than a single overwritable slot -
+    // registering a second listener no longer silently drops the first one.
+    private final List<Consumer<SyncResult>> onSyncComplete = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final List<Consumer<Boolean>> onConnectivityChange = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public SyncService(ApiClient api, LocalStore store) {
         this.api = api;
         this.store = store;
     }
 
+    /** Registers a callback to run after every sync cycle. Can be called more than once; every registered callback runs. */
     public void setOnSyncComplete(Consumer<SyncResult> callback) {
-        this.onSyncComplete = callback;
+        this.onSyncComplete.add(callback);
     }
 
+    /** Registers a callback to run whenever online/offline status flips. Can be called more than once; every registered callback runs. */
     public void setOnConnectivityChange(Consumer<Boolean> callback) {
-        this.onConnectivityChange = callback;
+        this.onConnectivityChange.add(callback);
     }
 
     public boolean isOnline() {
@@ -75,8 +81,6 @@ public class SyncService {
         }
     }
 
-
-
     /** Runs one sync cycle immediately, off the calling thread if it's the Swing EDT would be a mistake - callers should invoke this from a background thread (e.g. via SwingWorker). */
     public synchronized SyncResult syncNow() {
         try {
@@ -87,15 +91,15 @@ public class SyncService {
             JSONArray newQuizzes = response.optJSONArray("new_quizzes", new JSONArray());
             JSONArray notifications = response.optJSONArray("notifications", new JSONArray());
 
+            if (!newPosts.isEmpty()) {
+                store.cachePostsByTopic(newPosts);
+            }
             if (!notifications.isEmpty()) {
                 store.cacheNotifications(notifications);
             }
-            // new_posts/new_quizzes span many groups/topics at once, so we
-            // don't have a single group/topic id to key the cache under
-            // here - individual panels still cache their own scoped lists
-            // via cachePosts()/cacheQuizzes() when the person opens them.
-            // We still surface the raw delta to the UI so an "unseen
-            // activity" badge can be shown immediately.
+            // Quizzes can span many groups and the sync payload does not
+            // guarantee a group_id for every row, so scoped quiz panels still
+            // refresh their own cache when opened.
 
             String syncedAt = response.optString("synced_at", null);
             if (syncedAt != null) {
@@ -103,21 +107,33 @@ public class SyncService {
             }
 
             setOnline(true);
-            SyncResult result = new SyncResult(true, replayed, newPosts.length(), newQuizzes.length(), notifications.length(), null);
-            if (onSyncComplete != null) onSyncComplete.accept(result);
+            SyncResult result = new SyncResult(true, replayed, newPosts.length(), newQuizzes.length(), notifications.length(), store.failedOutboxCount(), null);
+            onSyncComplete.forEach(l -> l.accept(result));
             return result;
 
         } catch (ApiOfflineException e) {
             setOnline(false);
-            SyncResult result = new SyncResult(false, 0, 0, 0, 0, "Offline: " + e.getMessage());
-            if (onSyncComplete != null) onSyncComplete.accept(result);
+            SyncResult result = new SyncResult(false, 0, 0, 0, 0, store.failedOutboxCount(), "Offline: " + e.getMessage());
+            onSyncComplete.forEach(l -> l.accept(result));
             return result;
         } catch (ApiException e) {
             // Server reachable but rejected the sync (e.g. expired token) -
             // still "online" from a connectivity standpoint.
             setOnline(true);
-            SyncResult result = new SyncResult(false, 0, 0, 0, 0, e.getMessage());
-            if (onSyncComplete != null) onSyncComplete.accept(result);
+            SyncResult result = new SyncResult(false, 0, 0, 0, 0, store.failedOutboxCount(), e.getMessage());
+            onSyncComplete.forEach(l -> l.accept(result));
+            return result;
+        } catch (RuntimeException e) {
+            // IMPORTANT: this task is driven by scheduleWithFixedDelay(), and
+            // that scheduler PERMANENTLY stops running this task if any
+            // execution throws an exception it doesn't catch. A malformed
+            // outbox payload (JSONException) or a local SQLite hiccup
+            // (IllegalStateException from LocalStore) used to escape all the
+            // way out of syncNow() and silently kill background sync for the
+            // rest of the session - this is what caused sync to just stop
+            // working with no visible error. Catch it, report it, keep polling.
+            SyncResult result = new SyncResult(false, 0, 0, 0, 0, store.failedOutboxCount(), "Sync error: " + e.getMessage());
+            onSyncComplete.forEach(l -> l.accept(result));
             return result;
         }
     }
@@ -125,8 +141,8 @@ public class SyncService {
     private void setOnline(boolean nowOnline) {
         boolean changed = nowOnline != this.online;
         this.online = nowOnline;
-        if (changed && onConnectivityChange != null) {
-            onConnectivityChange.accept(nowOnline);
+        if (changed) {
+            onConnectivityChange.forEach(l -> l.accept(nowOnline));
         }
     }
 
@@ -148,23 +164,48 @@ public class SyncService {
                         JSONObject p = entry.payload();
                         long topicId = p.getLong("topic_id");
                         long[] excludeIds = toLongArray(p.optJSONArray("exclude_user_ids"));
-                        api.createPost(topicId, p.getString("content"), p.optString("attachment_url", null), excludeIds);
+                        // client_ref was stamped onto the payload when the action was first
+                        // composed (see TopicWorkspacePanel#sendPost), so a retry after a
+                        // timeout - or a replay of the same outbox row on the next poll -
+                        // always sends the SAME ref. A server that enforces uniqueness on
+                        // (user, client_ref) can return the original post instead of
+                        // creating a second one, which is what was causing sent-while-offline
+                        // messages to duplicate on sync.
+                        JSONObject created = api.createPost(topicId, p.getString("content"), p.optString("attachment_url", null), excludeIds, p.optString("client_ref", null));
+                        if (!created.has("topic_id")) {
+                            created.put("topic_id", topicId);
+                        }
+                        store.cachePosts(topicId, new JSONArray().put(created));
+                        store.removeLocalPendingPost(entry.id());
                     }
                     case "create_reply" -> {
                         JSONObject p = entry.payload();
-                        api.createReply(p.getLong("post_id"), p.getString("content"));
+                        api.createReply(p.getLong("post_id"), p.getString("content"), p.optString("client_ref", null));
+                        store.removeLocalPendingReply(p.getLong("post_id"), entry.id());
                     }
                     case "create_topic" -> {
                         JSONObject p = entry.payload();
-                        api.createTopic(p.getLong("group_id"), p.getString("title"));
+                        long groupId = p.getLong("group_id");
+                        JSONObject created = api.createTopic(groupId, p.getString("title"), p.optString("client_ref", null));
+                        store.cacheTopics(groupId, new JSONArray().put(created));
+                        store.removeLocalPendingTopic(groupId, entry.id());
                     }
                     default -> throw new ApiException(0, "Unknown outbox action kind: " + entry.kind(), null);
                 }
                 store.markOutboxSynced(entry.id());
                 succeeded++;
             } catch (ApiException e) {
-                // Leave this one queued; move on to the rest so one bad
-                // entry doesn't block everything behind it.
+                store.markOutboxFailed(entry.id(), e.getMessage());
+                store.markLocalPendingFailed(entry, e.getMessage());
+            } catch (RuntimeException e) {
+                // A malformed payload (JSONException from p.getLong/getString)
+                // or a local DB error (IllegalStateException) used to escape
+                // this loop entirely, aborting replay of every remaining
+                // outbox entry and bubbling up to kill the whole poll cycle.
+                // Treat it the same as a rejected action instead: fail just
+                // this one entry and keep going.
+                store.markOutboxFailed(entry.id(), "Client error: " + e.getMessage());
+                store.markLocalPendingFailed(entry, e.getMessage());
             }
         }
         return succeeded;
@@ -178,6 +219,6 @@ public class SyncService {
     }
 
     /** Outcome of one sync cycle, for the UI to show a status line / toast. */
-    public record SyncResult(boolean success, int outboxReplayed, int newPosts, int newQuizzes, int newNotifications, String errorMessage) {
+    public record SyncResult(boolean success, int outboxReplayed, int newPosts, int newQuizzes, int newNotifications, int failedOutbox, String errorMessage) {
     }
 }
