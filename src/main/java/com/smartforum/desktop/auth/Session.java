@@ -46,17 +46,47 @@ public class Session {
         return offlineMode;
     }
 
-    /** Primary role name (Administrator/Lecturer/Student) taken from the user's roles list, defaulting to Student. */
+    /**
+     * Primary role name (Administrator/Lecturer/Student).
+     *
+     * The server (AuthController) already computes this with the correct
+     * priority - Administrator > Lecturer > Student - across ALL of the
+     * user's role rows, and sends it as a flat "role" string on the user
+     * payload. We must use that value directly rather than re-deriving it
+     * from the raw "roles" relation array, because that array is unordered:
+     * taking roles[0] picks whichever role row the DB happened to return
+     * first, not the highest-priority one, which silently downgrades
+     * admins/lecturers who also hold a lower-priority role row.
+     */
     public String primaryRole() {
         if (currentUser == null) return "Student";
+
+        String flatRole = currentUser.optString("role", null);
+        if (flatRole != null && !flatRole.isEmpty()) {
+            return flatRole;
+        }
+
+        // Fallback for any older cached payload that predates the flat
+        // "role" field: derive priority manually across ALL roles,
+        // instead of just taking the first entry.
         JSONArray roles = currentUser.optJSONArray("roles");
         if (roles == null || roles.isEmpty()) return "Student";
-        JSONObject first = roles.getJSONObject(0);
-        // Server may nest role_name directly or under a "role" object,
-        // depending on the eager-load shape - handle both defensively.
-        if (first.has("role_name")) return first.getString("role_name");
-        JSONObject nested = first.optJSONObject("role");
-        return nested != null ? nested.optString("role_name", "Student") : "Student";
+
+        boolean hasAdmin = false;
+        boolean hasLecturer = false;
+        for (int i = 0; i < roles.length(); i++) {
+            JSONObject entry = roles.getJSONObject(i);
+            String name = entry.has("role_name")
+                    ? entry.optString("role_name", "")
+                    : (entry.optJSONObject("role") != null
+                    ? entry.optJSONObject("role").optString("role_name", "")
+                    : "");
+            if ("Administrator".equalsIgnoreCase(name)) hasAdmin = true;
+            if ("Lecturer".equalsIgnoreCase(name)) hasLecturer = true;
+        }
+        if (hasAdmin) return "Administrator";
+        if (hasLecturer) return "Lecturer";
+        return "Student";
     }
 
     public boolean isAdministrator() {
