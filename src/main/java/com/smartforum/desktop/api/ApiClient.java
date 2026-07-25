@@ -169,6 +169,75 @@ public class ApiClient {
         return baseUrl + "/topics/" + topicId + "/download-pdf";
     }
 
+    /**
+     * Downloads the exported PDF for a topic and returns the raw bytes.
+     *
+     * The endpoint requires the same {@code Authorization: Bearer <token>}
+     * header every other call uses, which a plain "open this URL in the
+     * system browser" approach can't send - the browser has no way to know
+     * the app's session token, so that link 401s (or the OS simply has no
+     * default browser configured). Fetching the bytes here, over the same
+     * authenticated HttpClient, and saving them to a local file is what
+     * actually works.
+     */
+    public byte[] downloadTopicPdf(long topicId) throws ApiException, ApiOfflineException {
+        String path = "/topics/" + topicId + "/download-pdf";
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + path))
+                .timeout(Duration.ofSeconds(30))
+                .header("Accept", "application/pdf")
+                .GET();
+
+        if (bearerToken != null) {
+            builder.header("Authorization", "Bearer " + bearerToken);
+        }
+
+        HttpResponse<byte[]> response;
+        try {
+            response = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+        } catch (HttpTimeoutException e) {
+            throw new ApiOfflineException("Request to " + path + " timed out.", e);
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ApiOfflineException("Could not reach the server for " + path + ".", e);
+        }
+
+        int status = response.statusCode();
+        if (status >= 200 && status < 300) {
+            return response.body();
+        }
+
+        String message = describeDownloadFailure(status, response.body());
+        throw new ApiException(status, message, null);
+    }
+
+    /**
+     * Builds a short, actionable message for a failed PDF download.
+     *
+     * A non-2xx response here is often the server's HTML error/login page
+     * rather than JSON (e.g. a 404 from the route not existing, or a
+     * login page from a "web" auth guard rejecting the bearer token), and
+     * dumping that raw HTML into a dialog is not useful to the person using
+     * the app. This condenses it into something they can act on.
+     */
+    private static String describeDownloadFailure(int status, byte[] body) {
+        String bodyStr = body == null ? "" : new String(body, StandardCharsets.UTF_8).trim();
+        boolean looksLikeHtml = bodyStr.startsWith("<!DOCTYPE") || bodyStr.startsWith("<html");
+
+        if (looksLikeHtml) {
+            return switch (status) {
+                case 404 -> "Server error " + status + ": the download-pdf route was not found on the server.";
+                case 401, 403 -> "Server error " + status + ": not authorized to download this export. " +
+                        "The server may be rejecting the API token on this route.";
+                case 500, 502, 503 -> "Server error " + status + ": the server hit an error generating the PDF.";
+                default -> "Server error " + status + ": the server returned an unexpected page instead of a PDF.";
+            };
+        }
+
+        String jsonMessage = extractMessage(bodyStr);
+        return "Export failed (" + status + "): " + jsonMessage;
+    }
+
     // ------------------------------------------------------------------
     // Posts & replies
     // ------------------------------------------------------------------
