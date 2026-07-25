@@ -11,24 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Shared application shell, built as a JPanel so it can be dropped straight
- * into the root window's CardLayout alongside the login/register screens
- * (rather than opening as its own separate JFrame). Mirrors the web
- * client's layout:
- *   - a cream top bar with the brand on the left and a red "Welcome, X"
- *     message on the right (layouts/app.blade.php .app-topbar)
- *   - a full-height navy sidebar with role-based navigation and a
- *     user/profile footer (.app-sidebar)
- *   - a white content area that fills the rest of the window, switching
- *     between panels via CardLayout the same way the web client toggles
- *     .dash-panel visibility
- *
- * Nav row sizing/spacing and font scale are carried over from the previous
- * desktop client's DashboardChrome (58px rows, generous padding, larger
- * nav/footer fonts), which read as much better-spaced than tighter sizing -
- * only the colors were swapped over to the Laravel palette.
- */
+
 public class DashboardChrome extends JPanel {
 
     private final CardLayout cardLayout = new CardLayout();
