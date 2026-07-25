@@ -11,8 +11,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The desktop client's offline store (SDD 4.2 "SyncRecord" table, and the
@@ -30,10 +33,25 @@ import java.util.List;
  * columns, so callers can either query structured columns for lists/search,
  * or re-parse the JSON for full detail - the same shape the API itself
  * would have returned.
+ *
+ * All public (and DB-touching private) methods below are `synchronized`.
+ * This class is backed by a SINGLE shared JDBC Connection, but it's called
+ * from many different background threads at once - refreshThread(),
+ * refreshTopicList(), sendPost(), quickReply(), CreateTopicDialog.submit(),
+ * and SyncService's own poll cycle can all be mid-flight simultaneously.
+ * The SQLite JDBC driver does not guarantee safety when one Connection is
+ * driven concurrently by multiple threads, so without this locking you get
+ * exactly the symptoms this used to cause: scrambled row order, rows that
+ * silently vanish or reappear, and reads that only pick up whichever
+ * thread's writes landed first. Synchronizing serializes all local-DB
+ * access across threads and removes the race entirely.
  */
 public class LocalStore implements AutoCloseable {
 
     private final Connection connection;
+
+    /** After this many failed replay attempts, a queued action stops retrying and is surfaced to the user as permanently failed instead of silently retried forever. */
+    private static final int MAX_OUTBOX_RETRIES = 5;
 
     public LocalStore() {
         this(AppConfig.dbFile());
@@ -136,9 +154,14 @@ public class LocalStore implements AutoCloseable {
                     kind TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    synced INTEGER DEFAULT 0
+                    synced INTEGER DEFAULT 0,
+                    failed INTEGER DEFAULT 0,
+                    error_message TEXT
                 )
             """);
+            addColumnIfMissing(st, "outbox", "failed", "INTEGER DEFAULT 0");
+            addColumnIfMissing(st, "outbox", "error_message", "TEXT");
+            addColumnIfMissing(st, "outbox", "retry_count", "INTEGER DEFAULT 0");
 
             // Files (e.g. exported topic PDFs) saved for offline access -
             // SDD 4.1 "File Storage" layer, mirrored locally so a previously
@@ -156,11 +179,22 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
+    private void addColumnIfMissing(Statement st, String table, String column, String definition) throws SQLException {
+        try (ResultSet rs = st.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (rs.next()) {
+                if (column.equalsIgnoreCase(rs.getString("name"))) {
+                    return;
+                }
+            }
+        }
+        st.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+    }
+
     // ------------------------------------------------------------------
     // sync_meta (mirrors the server's SyncRecord: last_synced_at per device)
     // ------------------------------------------------------------------
 
-    public void setMeta(String key, String value) {
+    public synchronized void setMeta(String key, String value) {
         String sql = "INSERT INTO sync_meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, key);
@@ -171,7 +205,7 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public String getMeta(String key) {
+    public synchronized String getMeta(String key) {
         String sql = "SELECT value FROM sync_meta WHERE key = ?";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, key);
@@ -183,11 +217,11 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public String getLastSyncedAt() {
+    public synchronized String getLastSyncedAt() {
         return getMeta("last_synced_at");
     }
 
-    public void setLastSyncedAt(String isoTimestamp) {
+    public synchronized void setLastSyncedAt(String isoTimestamp) {
         setMeta("last_synced_at", isoTimestamp);
     }
 
@@ -195,7 +229,7 @@ public class LocalStore implements AutoCloseable {
     // Caching groups/topics/posts/quizzes/notifications
     // ------------------------------------------------------------------
 
-    public void cacheGroups(JSONArray groups) {
+    public synchronized void cacheGroups(JSONArray groups) {
         String sql = """
             INSERT INTO cached_groups(group_id, name, description, member_count, topic_count, is_member, is_group_admin, raw_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -223,11 +257,11 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public List<JSONObject> cachedGroups() {
+    public synchronized List<JSONObject> cachedGroups() {
         return queryAllRawJson("SELECT raw_json FROM cached_groups ORDER BY name");
     }
 
-    public void cacheTopics(long groupId, JSONArray topics) {
+    public synchronized void cacheTopics(long groupId, JSONArray topics) {
         String sql = """
             INSERT INTO cached_topics(topic_id, group_id, title, category, posts_count, raw_json)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -252,11 +286,11 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public List<JSONObject> cachedTopics(long groupId) {
+    public synchronized List<JSONObject> cachedTopics(long groupId) {
         return queryAllRawJson("SELECT raw_json FROM cached_topics WHERE group_id = " + groupId + " ORDER BY topic_id DESC");
     }
 
-    public void cachePosts(long topicId, JSONArray posts) {
+    public synchronized void cachePosts(long topicId, JSONArray posts) {
         String sql = """
             INSERT INTO cached_posts(post_id, topic_id, author_id, author_name, content, posted_at, raw_json)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -282,11 +316,170 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public List<JSONObject> cachedPosts(long topicId) {
+    public synchronized void cachePostsByTopic(JSONArray posts) {
+        Map<Long, JSONArray> byTopic = new HashMap<>();
+        for (int i = 0; i < posts.length(); i++) {
+            JSONObject post = posts.getJSONObject(i);
+            long topicId = post.optLong("topic_id", -1);
+            if (topicId > 0) {
+                byTopic.computeIfAbsent(topicId, ignored -> new JSONArray()).put(post);
+            }
+        }
+        byTopic.forEach(this::cachePosts);
+    }
+
+    public synchronized void cachePendingTopic(long groupId, long outboxId, JSONObject payload, JSONObject user) {
+        JSONObject topic = new JSONObject()
+                .put("topic_id", -outboxId)
+                .put("group_id", groupId)
+                .put("title", payload.optString("title", ""))
+                .put("category", JSONObject.NULL)
+                .put("posts_count", 0)
+                .put("author", cachedAuthor(user))
+                .put("sync_status", "pending")
+                .put("outbox_id", outboxId);
+        cacheTopics(groupId, new JSONArray().put(topic));
+    }
+
+    public synchronized void removeLocalPendingTopic(long groupId, long outboxId) {
+        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM cached_topics WHERE topic_id = ?")) {
+            ps.setLong(1, -outboxId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to remove pending topic " + outboxId, e);
+        }
+    }
+
+    public synchronized void markLocalPendingTopicFailed(long groupId, long outboxId, String message) {
+        String sql = "SELECT raw_json FROM cached_topics WHERE topic_id = ?";
+        JSONObject topic = null;
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setLong(1, -outboxId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) topic = new JSONObject(rs.getString("raw_json"));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read pending topic " + outboxId, e);
+        }
+        if (topic == null) return;
+        topic.put("sync_status", "failed");
+        topic.put("sync_error", message);
+        cacheTopics(groupId, new JSONArray().put(topic));
+    }
+    public synchronized void cachePendingPost(long topicId, long outboxId, JSONObject payload, JSONObject user) {
+        JSONObject author = cachedAuthor(user);
+        JSONObject post = new JSONObject()
+                .put("post_id", -outboxId)
+                .put("topic_id", topicId)
+                .put("author", author)
+                .put("content", payload.optString("content", ""))
+                .put("posted_at", "Pending sync")
+                .put("replies", new JSONArray())
+                .put("sync_status", "pending")
+                .put("outbox_id", outboxId);
+        cachePosts(topicId, new JSONArray().put(post));
+    }
+
+    public synchronized void cachePendingReply(long postId, long outboxId, JSONObject payload, JSONObject user) {
+        JSONObject post = cachedPost(postId);
+        if (post == null) return;
+
+        JSONArray replies = post.optJSONArray("replies");
+        if (replies == null) {
+            replies = new JSONArray();
+            post.put("replies", replies);
+        }
+        replies.put(new JSONObject()
+                .put("reply_id", -outboxId)
+                .put("post_id", postId)
+                .put("author", cachedAuthor(user))
+                .put("content", payload.optString("content", ""))
+                .put("replied_at", "Pending sync")
+                .put("sync_status", "pending")
+                .put("outbox_id", outboxId));
+        cachePosts(post.optLong("topic_id", -1), new JSONArray().put(post));
+    }
+
+    public synchronized void removeLocalPendingPost(long outboxId) {
+        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM cached_posts WHERE post_id = ?")) {
+            ps.setLong(1, -outboxId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to remove pending post " + outboxId, e);
+        }
+    }
+
+    public synchronized void removeLocalPendingReply(long postId, long outboxId) {
+        JSONObject post = cachedPost(postId);
+        if (post == null) return;
+        JSONArray replies = post.optJSONArray("replies");
+        if (replies == null) return;
+
+        JSONArray kept = new JSONArray();
+        for (int i = 0; i < replies.length(); i++) {
+            JSONObject reply = replies.getJSONObject(i);
+            if (reply.optLong("outbox_id", Long.MIN_VALUE) != outboxId) {
+                kept.put(reply);
+            }
+        }
+        post.put("replies", kept);
+        cachePosts(post.optLong("topic_id", -1), new JSONArray().put(post));
+    }
+
+    public synchronized void markLocalPendingFailed(OutboxEntry entry, String message) {
+        JSONObject payload = entry.payload();
+        if ("create_topic".equals(entry.kind())) {
+            markLocalPendingTopicFailed(payload.optLong("group_id", -1), entry.id(), message);
+        } else if ("create_post".equals(entry.kind())) {
+            JSONObject post = cachedPost(-entry.id());
+            if (post != null) {
+                post.put("sync_status", "failed");
+                post.put("sync_error", message);
+                post.put("posted_at", "Failed to sync");
+                cachePosts(post.optLong("topic_id", payload.optLong("topic_id", -1)), new JSONArray().put(post));
+            }
+        } else if ("create_reply".equals(entry.kind())) {
+            long postId = payload.optLong("post_id", -1);
+            JSONObject post = cachedPost(postId);
+            if (post == null) return;
+            JSONArray replies = post.optJSONArray("replies");
+            if (replies == null) return;
+            for (int i = 0; i < replies.length(); i++) {
+                JSONObject reply = replies.getJSONObject(i);
+                if (reply.optLong("outbox_id", Long.MIN_VALUE) == entry.id()) {
+                    reply.put("sync_status", "failed");
+                    reply.put("sync_error", message);
+                    reply.put("replied_at", "Failed to sync");
+                }
+            }
+            cachePosts(post.optLong("topic_id", -1), new JSONArray().put(post));
+        }
+    }
+
+    private synchronized JSONObject cachedPost(long postId) {
+        String sql = "SELECT raw_json FROM cached_posts WHERE post_id = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setLong(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? new JSONObject(rs.getString("raw_json")) : null;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read cached post " + postId, e);
+        }
+    }
+
+    private JSONObject cachedAuthor(JSONObject user) {
+        JSONObject author = new JSONObject()
+                .put("user_id", user == null ? 0 : user.optLong("user_id", 0))
+                .put("full_name", user == null ? "You" : user.optString("full_name", "You"));
+        return author.put("cached_at", Instant.now().toString());
+    }
+
+    public synchronized List<JSONObject> cachedPosts(long topicId) {
         return queryAllRawJson("SELECT raw_json FROM cached_posts WHERE topic_id = " + topicId + " ORDER BY post_id ASC");
     }
 
-    public void cacheQuizzes(long groupId, JSONArray quizzes) {
+    public synchronized void cacheQuizzes(long groupId, JSONArray quizzes) {
         String sql = """
             INSERT INTO cached_quizzes(quiz_id, group_id, title, status, raw_json)
             VALUES (?, ?, ?, ?, ?)
@@ -309,11 +502,11 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public List<JSONObject> cachedQuizzes(long groupId) {
+    public synchronized List<JSONObject> cachedQuizzes(long groupId) {
         return queryAllRawJson("SELECT raw_json FROM cached_quizzes WHERE group_id = " + groupId + " ORDER BY quiz_id DESC");
     }
 
-    public void cacheNotifications(JSONArray notifications) {
+    public synchronized void cacheNotifications(JSONArray notifications) {
         String sql = """
             INSERT INTO cached_notifications(notification_id, message, is_read, created_at, raw_json)
             VALUES (?, ?, ?, ?, ?)
@@ -336,7 +529,7 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public List<JSONObject> cachedNotifications() {
+    public synchronized List<JSONObject> cachedNotifications() {
         return queryAllRawJson("SELECT raw_json FROM cached_notifications ORDER BY notification_id DESC");
     }
 
@@ -345,7 +538,7 @@ public class LocalStore implements AutoCloseable {
     // ------------------------------------------------------------------
 
     /** Queue an action performed while offline. `kind` identifies what it was (e.g. "create_post"), `payload` is the JSON ApiClient would have sent. */
-    public long queueOutboxAction(String kind, JSONObject payload) {
+    public synchronized long queueOutboxAction(String kind, JSONObject payload) {
         String sql = "INSERT INTO outbox(kind, payload) VALUES (?, ?)";
         try (PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, kind);
@@ -359,16 +552,18 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public List<OutboxEntry> pendingOutboxActions() {
+    public synchronized List<OutboxEntry> pendingOutboxActions() {
         List<OutboxEntry> out = new ArrayList<>();
-        String sql = "SELECT id, kind, payload, created_at FROM outbox WHERE synced = 0 ORDER BY id ASC";
+        String sql = "SELECT id, kind, payload, created_at, error_message, retry_count FROM outbox WHERE synced = 0 AND failed = 0 ORDER BY id ASC";
         try (Statement st = connection.createStatement(); ResultSet rs = st.executeQuery(sql)) {
             while (rs.next()) {
                 out.add(new OutboxEntry(
                         rs.getLong("id"),
                         rs.getString("kind"),
                         new JSONObject(rs.getString("payload")),
-                        rs.getString("created_at")
+                        rs.getString("created_at"),
+                        rs.getString("error_message"),
+                        rs.getInt("retry_count")
                 ));
             }
         } catch (SQLException e) {
@@ -377,8 +572,8 @@ public class LocalStore implements AutoCloseable {
         return out;
     }
 
-    public void markOutboxSynced(long outboxId) {
-        try (PreparedStatement ps = connection.prepareStatement("UPDATE outbox SET synced = 1 WHERE id = ?")) {
+    public synchronized void markOutboxSynced(long outboxId) {
+        try (PreparedStatement ps = connection.prepareStatement("UPDATE outbox SET synced = 1, failed = 0, error_message = NULL WHERE id = ?")) {
             ps.setLong(1, outboxId);
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -386,12 +581,49 @@ public class LocalStore implements AutoCloseable {
         }
     }
 
-    public int pendingOutboxCount() {
+    public synchronized void markOutboxFailed(long outboxId, String errorMessage) {
+        // Retries a handful of times (e.g. a transient server hiccup) before
+        // giving up - previously this set failed=1 on the very first error,
+        // so one rejected action stayed stuck forever, since
+        // pendingOutboxActions() never looks at failed=1 rows again, which
+        // permanently inflated the "N item(s) need attention" count.
+        String sql = "UPDATE outbox SET retry_count = retry_count + 1, " +
+                "failed = CASE WHEN retry_count + 1 >= ? THEN 1 ELSE 0 END, " +
+                "error_message = ? WHERE id = ?";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setInt(1, MAX_OUTBOX_RETRIES);
+            ps.setString(2, errorMessage);
+            ps.setLong(3, outboxId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to mark outbox entry " + outboxId + " failed", e);
+        }
+    }
+
+    public synchronized int pendingOutboxCount() {
         try (Statement st = connection.createStatement();
-             ResultSet rs = st.executeQuery("SELECT COUNT(*) AS c FROM outbox WHERE synced = 0")) {
+             ResultSet rs = st.executeQuery("SELECT COUNT(*) AS c FROM outbox WHERE synced = 0 AND failed = 0")) {
             return rs.next() ? rs.getInt("c") : 0;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to count pending outbox actions", e);
+        }
+    }
+
+    public synchronized int failedOutboxCount() {
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery("SELECT COUNT(*) AS c FROM outbox WHERE synced = 0 AND failed = 1")) {
+            return rs.next() ? rs.getInt("c") : 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count failed outbox actions", e);
+        }
+    }
+
+    /** Drops every entry that used up all its retries, so the "N item(s) need attention" count can actually be cleared instead of growing forever. */
+    public synchronized int clearFailedOutbox() {
+        try (Statement st = connection.createStatement()) {
+            return st.executeUpdate("DELETE FROM outbox WHERE failed = 1");
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to clear failed outbox entries", e);
         }
     }
 
@@ -399,7 +631,7 @@ public class LocalStore implements AutoCloseable {
     // Cached files (offline-readable exports, e.g. topic PDFs)
     // ------------------------------------------------------------------
 
-    public void recordCachedFile(String kind, long referenceId, String fileName, String localPath) {
+    public synchronized void recordCachedFile(String kind, long referenceId, String fileName, String localPath) {
         String sql = "INSERT INTO cached_files(kind, reference_id, file_name, local_path) VALUES (?, ?, ?, ?)";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, kind);
@@ -416,7 +648,7 @@ public class LocalStore implements AutoCloseable {
     // Helpers
     // ------------------------------------------------------------------
 
-    private List<JSONObject> queryAllRawJson(String sql) {
+    private synchronized List<JSONObject> queryAllRawJson(String sql) {
         List<JSONObject> out = new ArrayList<>();
         try (Statement st = connection.createStatement(); ResultSet rs = st.executeQuery(sql)) {
             while (rs.next()) {
@@ -429,7 +661,7 @@ public class LocalStore implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         try {
             connection.close();
         } catch (SQLException ignored) {

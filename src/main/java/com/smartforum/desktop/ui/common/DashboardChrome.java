@@ -51,9 +51,13 @@ public class DashboardChrome extends JPanel {
         add(buildBody(ctx, navItems, onLogout), BorderLayout.CENTER);
 
         ctx.sync.setOnConnectivityChange(online ->
-                SwingUtilities.invokeLater(() -> statusBar.setOnline(online, ctx.store.pendingOutboxCount())));
+                SwingUtilities.invokeLater(() -> statusBar.setOnline(online, ctx.store.pendingOutboxCount(), ctx.store.failedOutboxCount())));
         ctx.sync.setOnSyncComplete(result ->
-                SwingUtilities.invokeLater(() -> statusBar.setOnline(result.success() || ctx.sync.isOnline(), ctx.store.pendingOutboxCount())));
+                SwingUtilities.invokeLater(() -> statusBar.setOnline(result.success() || ctx.sync.isOnline(), ctx.store.pendingOutboxCount(), ctx.store.failedOutboxCount())));
+        statusBar.setOnDismissFailed(() -> {
+            ctx.store.clearFailedOutbox();
+            statusBar.setOnline(ctx.sync.isOnline(), ctx.store.pendingOutboxCount(), ctx.store.failedOutboxCount());
+        });
     }
 
     private JComponent buildTopBar(AppContext ctx) {
@@ -192,45 +196,54 @@ public class DashboardChrome extends JPanel {
      */
     private static Color iconColorFor(String icon) {
         return switch (icon) {
-            case "\uD83D\uDCDD" -> new Color(0xF0C36D); // 📝 Quizzes - gold
-            case "\u2728" -> new Color(0x2DD4BF);       // ✨ Recommended - teal
-            case "\uD83D\uDD14" -> new Color(0xDC3545); // 🔔 Notifications - red
+            case "\uD83D\uDCDD" -> new Color(0xF0C36D); // \ud83d\udcdd Quizzes - gold
+            case "\u2728" -> new Color(0x2DD4BF);       // \u2728 Recommended - teal
+            case "\uD83D\uDD14" -> new Color(0xDC3545); // \ud83d\udd14 Notifications - red
             default -> Theme.PAPER;
         };
     }
 
     private JComponent buildUserFooter(AppContext ctx, Runnable onLogout) {
-        JPanel footer = new JPanel();
+        JPanel footer = new JPanel(new BorderLayout(12, 0));
         footer.setOpaque(false);
-        footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
         footer.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(255, 255, 255, 40)),
                 new EmptyBorder(12, 16, 14, 16)));
 
+        AvatarView avatar = new AvatarView(38, new Color(0x2DD4BF), new Color(255, 255, 255, 60));
+        avatar.setInitials(initialsFor(ctx.session.fullName()));
+        String avatarUrl = ctx.session.user() != null ? ctx.session.user().optString("avatar_url", null) : null;
+        avatar.loadFromUrl(avatarUrl);
+
+        JPanel textStack = new JPanel();
+        textStack.setOpaque(false);
+        textStack.setLayout(new BoxLayout(textStack, BoxLayout.Y_AXIS));
+
         JLabel name = new JLabel(ctx.session.fullName());
-        name.setForeground(new Color(0xF0C36D));
+        name.setForeground(Theme.PAPER);
         name.setFont(Theme.SIDEBAR_NAME_FONT);
         name.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JLabel role = new JLabel(ctx.session.primaryRole());
-        role.setForeground(Theme.PAPER);
-        role.setFont(Theme.SMALL_FONT);
-        role.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        JPanel links = new JPanel(new FlowLayout(FlowLayout.LEFT, 14, 4));
-        links.setOpaque(false);
-        links.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JButton profileLink = footerLink("My Profile", () -> showPanel("profile"));
         JButton logoutLink = footerLink("Log out", onLogout);
-        links.add(profileLink);
-        links.add(logoutLink);
+        logoutLink.setAlignmentX(Component.LEFT_ALIGNMENT);
+        logoutLink.setMargin(new Insets(0, 0, 0, 0));
 
-        footer.add(name);
-        footer.add(Box.createVerticalStrut(3));
-        footer.add(role);
-        footer.add(Box.createVerticalStrut(10));
-        footer.add(links);
+        textStack.add(name);
+        textStack.add(Box.createVerticalStrut(2));
+        textStack.add(logoutLink);
+
+        footer.add(avatar, BorderLayout.WEST);
+        footer.add(textStack, BorderLayout.CENTER);
         return footer;
+    }
+
+    /** First letter of the first and last name segments (e.g. "Carlos Bonaparte" -> "CB"), mirroring the Laravel client's avatar fallback. */
+    private static String initialsFor(String fullName) {
+        if (fullName == null || fullName.isBlank()) return "?";
+        String[] parts = fullName.trim().split("\\s+");
+        String first = String.valueOf(parts[0].charAt(0));
+        if (parts.length == 1) return first.toUpperCase();
+        return (first + parts[parts.length - 1].charAt(0)).toUpperCase();
     }
 
     private JButton footerLink(String text, Runnable action) {
@@ -270,7 +283,7 @@ public class DashboardChrome extends JPanel {
         });
 
         navPanel.revalidate();   // ADD THIS
-        navPanel.repaint();      // ADD THIS — repaints the whole sidebar list at once
+        navPanel.repaint();      // ADD THIS - repaints the whole sidebar list at once
 
         Runnable callback = onShowCallbacks.get(key);
         if (callback != null) {
