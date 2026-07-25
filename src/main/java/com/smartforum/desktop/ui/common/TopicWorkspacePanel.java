@@ -15,6 +15,9 @@ import java.util.List;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.awt.datatransfer.StringSelection;
 
 
@@ -386,7 +389,7 @@ public class TopicWorkspacePanel extends JPanel {
         JButton flagBtn = Buttons.link(isFlagged ? "Flagged" : "Flag", Theme.WARN);
         flagBtn.addActionListener(e -> flagPost(postId, !isFlagged));
         String syncStatus = post.optString("sync_status", "");
-        JLabel time = new JLabel(post.optString("posted_at", ""));
+        JLabel time = new JLabel(formatDateTime(post.optString("posted_at", "")));
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(syncStatus.equals("pending") || syncStatus.equals("failed") ? Theme.WARN : Theme.MUTED);
 
@@ -455,7 +458,8 @@ public class TopicWorkspacePanel extends JPanel {
         JButton flagBtn = Buttons.link(flagged ? "Flagged" : "Flag", Theme.WARN);
         flagBtn.addActionListener(e -> flagReply(replyId, !flagged));
         String syncStatus = reply.optString("sync_status", "");
-        JLabel time = new JLabel(reply.optString("replied_at", ""));
+        JLabel time = new JLabel(formatDateTime(reply.optString("replied_at", "")));
+        
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(syncStatus.equals("pending") || syncStatus.equals("failed") ? Theme.WARN : Theme.MUTED);
 
@@ -887,5 +891,25 @@ public class TopicWorkspacePanel extends JPanel {
 
     private void exportBtnSetEnabled(boolean enabled) {
         if (exportBtn != null) exportBtn.setEnabled(enabled);
+
     }
+
+    
+    private String formatDateTime(String timestamp) {
+    if (timestamp == null || timestamp.isBlank()) {
+        return "";
+    }
+
+    try {
+        Instant instant = Instant.parse(timestamp);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, h:mm a")
+                .withZone(ZoneId.systemDefault());
+
+        return formatter.format(instant);
+
+    } catch (Exception e) {
+        return timestamp; // If parsing fails, show the original value.
+    }
+}
 }
