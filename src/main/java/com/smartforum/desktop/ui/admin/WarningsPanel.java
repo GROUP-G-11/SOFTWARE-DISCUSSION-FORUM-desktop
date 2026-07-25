@@ -11,8 +11,23 @@ import org.json.JSONObject;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
 
-/** Matches dashboard/admin.blade.php #panel-warnings: inactivity warnings, with a Resolve action. */
+/**
+ * Matches dashboard/admin.blade.php #panel-warnings (loadWarningsAndFlags):
+ * inactivity warnings AND flagged content (posts/replies flagged by
+ * lecturers or student group admins) merged into one list, most recent
+ * first, instead of only showing inactivity warnings.
+ *
+ * Previously this panel only called listWarnings(), so a flagged post or
+ * reply never showed up here at all - the admin had no way to see it
+ * outside the separate Notifications page. It now also pulls
+ * listNotifications() and folds in any unread notification that looks
+ * like a flag, exactly like the web client does.
+ */
 public class WarningsPanel extends JPanel {
 
     private final AppContext ctx;
@@ -44,39 +59,102 @@ public class WarningsPanel extends JPanel {
         add(new JScrollPane(body), BorderLayout.CENTER);
     }
 
+    /** One row of merged data, either an inactivity warning or a flagged notification. */
+    private record Entry(boolean isWarning, JSONObject data, long sortValue) {
+    }
+
     public void refresh() {
-        new SwingWorker<JSONArray, Void>() {
+        new SwingWorker<List<Entry>, Void>() {
             @Override
-            protected JSONArray doInBackground() {
+            protected List<Entry> doInBackground() {
+                JSONArray warnings = null;
+                JSONArray notifications = null;
                 try {
-                    return ctx.api.listWarnings();
-                } catch (ApiException | ApiOfflineException e) {
+                    warnings = ctx.api.listWarnings();
+                } catch (ApiException | ApiOfflineException ignored) {
+                }
+                try {
+                    JSONObject notifResp = ctx.api.listNotifications();
+                    notifications = notifResp.optJSONArray("data", null);
+                    if (notifications == null) {
+                        // Some endpoints return a bare array instead of {"data": [...]}.
+                        notifications = new JSONArray();
+                    }
+                } catch (ApiException | ApiOfflineException ignored) {
+                }
+
+                if (warnings == null && notifications == null) {
                     return null;
                 }
+
+                List<Entry> entries = new ArrayList<>();
+                if (warnings != null) {
+                    for (int i = 0; i < warnings.length(); i++) {
+                        JSONObject w = warnings.getJSONObject(i);
+                        entries.add(new Entry(true, w, parseTime(w.optString("issue_date", ""))));
+                    }
+                }
+                if (notifications != null) {
+                    for (int i = 0; i < notifications.length(); i++) {
+                        JSONObject n = notifications.getJSONObject(i);
+                        if (isUnreadFlag(n)) {
+                            entries.add(new Entry(false, n, parseTime(n.optString("created_at", ""))));
+                        }
+                    }
+                }
+                entries.sort((a, b) -> Long.compare(b.sortValue(), a.sortValue()));
+                return entries;
             }
 
             @Override
             protected void done() {
-                JSONArray warnings;
+                List<Entry> entries;
                 try {
-                    warnings = get();
+                    entries = get();
                 } catch (Exception e) {
-                    warnings = null;
+                    entries = null;
                 }
-                render(warnings);
+                render(entries);
             }
         }.execute();
     }
 
-    private void render(JSONArray warnings) {
+    /**
+     * is_read can arrive as a real boolean, an integer (0/1), or a string
+     * ("0"/"1") depending on how the backend serialized the tinyint column -
+     * a plain `!n.optBoolean("is_read")` would silently treat a "0" string
+     * as read (org.json's optBoolean only recognizes actual Booleans or the
+     * literal strings "true"/"false", not "0"/"1") and every flag would
+     * disappear from this list. This normalizes every form the API can send.
+     */
+    private boolean isUnreadFlag(JSONObject n) {
+        Object raw = n.opt("is_read");
+        boolean isRead = "true".equals(String.valueOf(raw)) || "1".equals(String.valueOf(raw)) || Boolean.TRUE.equals(raw);
+        if (isRead) return false;
+
+        String type = n.optString("type", "").toLowerCase();
+        String message = n.optString("message", "").toLowerCase();
+        return type.contains("flag") || message.contains("flag");
+    }
+
+    private long parseTime(String isoDateTime) {
+        if (isoDateTime == null || isoDateTime.isBlank()) return 0;
+        try {
+            return Instant.parse(isoDateTime).toEpochMilli();
+        } catch (DateTimeParseException e) {
+            return 0;
+        }
+    }
+
+    private void render(List<Entry> entries) {
         body.removeAll();
-        if (warnings == null) {
+        if (entries == null) {
             body.add(new JLabel("Warnings need an internet connection to load."));
-        } else if (warnings.isEmpty()) {
+        } else if (entries.isEmpty()) {
             body.add(new JLabel("No inactivity warnings or flagged content right now."));
         } else {
-            for (int i = 0; i < warnings.length(); i++) {
-                body.add(row(warnings.getJSONObject(i)));
+            for (Entry entry : entries) {
+                body.add(entry.isWarning() ? warningRow(entry.data()) : flagRow(entry.data()));
                 body.add(Box.createVerticalStrut(1));
             }
         }
@@ -84,38 +162,77 @@ public class WarningsPanel extends JPanel {
         body.repaint();
     }
 
-    private JComponent row(JSONObject w) {
-        JPanel r = new JPanel(new BorderLayout());
-        r.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.LINE), new EmptyBorder(10, 4, 10, 4)));
-        r.setMaximumSize(new Dimension(Integer.MAX_VALUE, 54));
-
+    private JComponent warningRow(JSONObject w) {
         JSONObject user = w.optJSONObject("user");
         JSONObject group = w.optJSONObject("group");
         boolean resolved = w.optBoolean("resolved", false);
 
+        JComponent right;
+        if (resolved) {
+            right = Buttons.pill("RESOLVED", Theme.SKY_DIM, Theme.SKY);
+        } else {
+            JButton resolve = Buttons.secondary("Resolve");
+            resolve.addActionListener(e -> resolveWarning(w.getLong("warning_id")));
+            right = resolve;
+        }
+
+        String name = (user != null ? user.optString("full_name") : "Member")
+                + "  \u2014  warning #" + w.optInt("sequence_number", 1)
+                + (group != null ? "  in " + group.optString("name") : "");
+
+        return row(Buttons.pill("INACTIVITY", new Color(0xFFEDD5), new Color(0xC2410C)),
+                name, "Issued " + w.optString("issue_date", ""), right);
+    }
+
+    private JComponent flagRow(JSONObject n) {
+        long notificationId = n.optLong("notification_id", n.optLong("id", -1));
+        // The Post vs Reply distinction lives in related_type (a plain,
+        // unconstrained string column) rather than the notifications.type
+        // ENUM, which only ever stores 'General' for these - see
+        // PostController::flag()/ReplyController::flag() on the backend.
+        String kind = n.optString("related_type", "Content");
+        String message = n.optString("message", "");
+
+        JButton dismiss = Buttons.secondary("Dismiss");
+        dismiss.addActionListener(e -> dismissFlag(notificationId, dismiss));
+
+        return row(Buttons.pill((kind + " FLAGGED").toUpperCase(), new Color(0xFEE2E2), new Color(0xDC2626)),
+                message, formatDate(n.optString("created_at", "")), dismiss);
+    }
+
+    private String formatDate(String isoDateTime) {
+        if (isoDateTime == null || isoDateTime.isBlank()) return "N/A";
+        return isoDateTime;
+    }
+
+    private JComponent row(JComponent badge, String title, String subtitle, JComponent action) {
+        JPanel r = new JPanel(new BorderLayout(12, 0));
+        r.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.LINE), new EmptyBorder(10, 4, 10, 4)));
+        r.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
+
+        JPanel badgeWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        badgeWrap.setOpaque(false);
+        badgeWrap.add(badge);
+
         JPanel left = new JPanel();
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
-        JLabel name = new JLabel((user != null ? user.optString("full_name") : "Member")
-                + "  \u2014  warning #" + w.optInt("sequence_number", 1)
-                + (group != null ? "  in " + group.optString("name") : ""));
+        JLabel name = new JLabel(title);
         name.setFont(Theme.BODY_FONT_BOLD);
-        JLabel date = new JLabel("Issued " + w.optString("issue_date", ""));
+        JLabel date = new JLabel(subtitle);
         date.setFont(Theme.SMALL_FONT);
         date.setForeground(Color.GRAY);
         left.add(name);
         left.add(date);
 
-        r.add(left, BorderLayout.WEST);
+        JPanel center = new JPanel(new BorderLayout(10, 0));
+        center.setOpaque(false);
+        center.add(badgeWrap, BorderLayout.WEST);
+        center.add(left, BorderLayout.CENTER);
 
-        if (resolved) {
-            r.add(Buttons.pill("RESOLVED", Theme.SKY_DIM, Theme.SKY), BorderLayout.EAST);
-        } else {
-            JButton resolve = Buttons.secondary("Resolve");
-            resolve.addActionListener(e -> resolveWarning(w.getLong("warning_id")));
-            r.add(resolve, BorderLayout.EAST);
-        }
+        r.add(center, BorderLayout.CENTER);
+        r.add(action, BorderLayout.EAST);
         return r;
     }
 
@@ -125,6 +242,27 @@ public class WarningsPanel extends JPanel {
             protected Void doInBackground() {
                 try {
                     ctx.api.resolveWarning(warningId);
+                } catch (ApiException | ApiOfflineException ignored) {
+                }
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                refresh();
+            }
+        }.execute();
+    }
+
+    private void dismissFlag(long notificationId, JButton source) {
+        if (notificationId < 0) return;
+        source.setEnabled(false);
+        source.setText("Dismissing\u2026");
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                try {
+                    ctx.api.markNotificationRead(notificationId);
                 } catch (ApiException | ApiOfflineException ignored) {
                 }
                 return null;

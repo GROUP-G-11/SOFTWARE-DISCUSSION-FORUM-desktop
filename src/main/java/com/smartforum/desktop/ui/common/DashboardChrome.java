@@ -135,6 +135,14 @@ public class DashboardChrome extends JPanel {
         JPanel footerWrap = new JPanel();
         footerWrap.setOpaque(false);
         footerWrap.setLayout(new BoxLayout(footerWrap, BoxLayout.Y_AXIS));
+
+        // FIX: every other row added to a BoxLayout in this sidebar (see navRow())
+        // explicitly sets alignmentX + a maximumSize. statusBar never did, so
+        // BoxLayout was free to squeeze its row down to almost nothing, leaving
+        // only the dot glyph visible and hiding the "Online"/"Offline" text.
+        statusBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+        statusBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+
         footerWrap.add(statusBar);
         footerWrap.add(buildUserFooter(ctx, onLogout));
         sidebar.add(footerWrap, BorderLayout.SOUTH);

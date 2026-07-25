@@ -476,7 +476,11 @@ public class LocalStore implements AutoCloseable {
     }
 
     public synchronized List<JSONObject> cachedPosts(long topicId) {
-        return queryAllRawJson("SELECT raw_json FROM cached_posts WHERE topic_id = " + topicId + " ORDER BY post_id ASC");
+
+        return queryAllRawJson(
+                "SELECT raw_json FROM cached_posts WHERE topic_id = " + topicId +
+                        " ORDER BY (post_id < 0) ASC, ABS(post_id) ASC"
+        );
     }
 
     public synchronized void cacheQuizzes(long groupId, JSONArray quizzes) {
