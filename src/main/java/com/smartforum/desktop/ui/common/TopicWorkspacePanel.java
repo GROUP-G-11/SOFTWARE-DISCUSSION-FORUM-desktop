@@ -355,8 +355,8 @@ public class TopicWorkspacePanel extends JPanel {
         replyBtn.addActionListener(e -> quickReply(postId));
         JButton shareBtn = Buttons.link("Forward", Theme.ACCENT_DARK);
         shareBtn.addActionListener(e -> shareMenu(postId));
-       JButton flagBtn = Buttons.link(isFlagged ? "Flagged" : "Flag", Theme.WARN);
-       flagBtn.addActionListener(e -> flagPost(postId, !isFlagged));
+        JButton flagBtn = Buttons.link(isFlagged ? "Flagged" : "Flag", Theme.WARN);
+        flagBtn.addActionListener(e -> flagPost(postId, !isFlagged));
         JLabel time = new JLabel(post.optString("posted_at", ""));
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(Theme.MUTED);
@@ -423,8 +423,8 @@ public class TopicWorkspacePanel extends JPanel {
 
         JButton shareBtn = Buttons.link("Forward", Theme.ACCENT_DARK);
         shareBtn.addActionListener(e -> shareReplyMenu(replyId));
-       JButton flagBtn = Buttons.link(flagged ? "Flagged" : "Flag", Theme.WARN);
-       flagBtn.addActionListener(e -> flagReply(replyId, !flagged));
+        JButton flagBtn = Buttons.link(flagged ? "Flagged" : "Flag", Theme.WARN);
+        flagBtn.addActionListener(e -> flagReply(replyId, !flagged));
         JLabel time = new JLabel(reply.optString("replied_at", ""));
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(Theme.MUTED);
@@ -547,38 +547,38 @@ public class TopicWorkspacePanel extends JPanel {
         }.execute();
     }
 
-   private void flagReply(long replyId, boolean flagged) {
-    if (replyId < 0) return;
-    new SwingWorker<Boolean, Void>() {
-        @Override
-        protected Boolean doInBackground() {
-            try {
-                ctx.api.flagReply(replyId, flagged);
-                return true;
-            } catch (ApiException | ApiOfflineException e) {
-                return false;
+    private void flagReply(long replyId, boolean flagged) {
+        if (replyId < 0) return;
+        new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() {
+                try {
+                    ctx.api.flagReply(replyId, flagged);
+                    return true;
+                } catch (ApiException | ApiOfflineException e) {
+                    return false;
+                }
             }
-        }
 
-        @Override
-        protected void done() {
-            boolean ok;
-            try {
-                ok = get();
-            } catch (Exception e) {
-                ok = false;
+            @Override
+            protected void done() {
+                boolean ok;
+                try {
+                    ok = get();
+                } catch (Exception e) {
+                    ok = false;
+                }
+                if (ok) {
+                    refreshThread();
+                } else {
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this,
+                            flagged ? "Couldn't flag this reply - check your connection and try again."
+                                    : "Couldn't remove the flag - check your connection and try again.",
+                            "Flag failed", JOptionPane.WARNING_MESSAGE);
+                }
             }
-            if (ok) {
-                refreshThread();
-            } else {
-                JOptionPane.showMessageDialog(TopicWorkspacePanel.this,
-                        flagged ? "Couldn't flag this reply - check your connection and try again."
-                                : "Couldn't remove the flag - check your connection and try again.",
-                        "Flag failed", JOptionPane.WARNING_MESSAGE);
-            }
-        }
-    }.execute();
-}
+        }.execute();
+    }
     private void showExcludeDialog() {
         long groupId = currentGroupId;
         new SwingWorker<JSONArray, Void>() {
