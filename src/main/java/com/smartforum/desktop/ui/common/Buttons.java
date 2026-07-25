@@ -13,12 +13,7 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Pill-shaped, fully-rounded buttons matching the web client's rounded
- * buttons. Every button here is a RoundedButton so the whole app - not
- * just one panel - reads as the same rounded "soft" UI as the Laravel
- * frontend, instead of flat rectangular Swing buttons.
- */
+
 public final class Buttons {
 
     private Buttons() {
