@@ -13,6 +13,11 @@ import java.io.File;
 import java.net.URI;
 import java.util.List;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.awt.datatransfer.StringSelection;
+
+
 public class TopicWorkspacePanel extends JPanel {
 
     private final AppContext ctx;
@@ -351,12 +356,11 @@ public class TopicWorkspacePanel extends JPanel {
 
         boolean isFlagged = post.optBoolean("is_flagged", false);
 
-        JButton replyBtn = Buttons.link("Reply", Theme.ACCENT_DARK);
+       JButton replyBtn = Buttons.link("Reply", Theme.ACCENT_DARK);
         replyBtn.addActionListener(e -> quickReply(postId));
         JButton shareBtn = Buttons.link("Forward", Theme.ACCENT_DARK);
-        shareBtn.addActionListener(e -> shareMenu(postId));
-       JButton flagBtn = Buttons.link(isFlagged ? "Flagged" : "Flag", Theme.WARN);
-       flagBtn.addActionListener(e -> flagPost(postId, !isFlagged));
+        shareBtn.addActionListener(e -> shareMenu(postId, post.optString("content", "")));
+        JButton flagBtn = Buttons.link(isFlagged ? "Flagged" : "Flag", Theme.WARN);
         JLabel time = new JLabel(post.optString("posted_at", ""));
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(Theme.MUTED);
@@ -421,8 +425,8 @@ public class TopicWorkspacePanel extends JPanel {
         meta.setOpaque(false);
         meta.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JButton shareBtn = Buttons.link("Forward", Theme.ACCENT_DARK);
-        shareBtn.addActionListener(e -> shareReplyMenu(replyId));
+       JButton shareBtn = Buttons.link("Forward", Theme.ACCENT_DARK);
+        shareBtn.addActionListener(e -> shareReplyMenu(replyId, reply.optString("content", "")));
        JButton flagBtn = Buttons.link(flagged ? "Flagged" : "Flag", Theme.WARN);
        flagBtn.addActionListener(e -> flagReply(replyId, !flagged));
         JLabel time = new JLabel(reply.optString("replied_at", ""));
@@ -480,38 +484,119 @@ public class TopicWorkspacePanel extends JPanel {
     // rejected with a 422 before it ever reaches the database.
     private static final String[] SHARE_PLATFORMS = {"WhatsApp", "Twitter", "Facebook", "LinkedIn", "Clipboard"};
 
-    private void shareMenu(long postId) {
+   private void shareMenu(long postId, String content) {
         if (postId < 0) return;
         String choice = (String) JOptionPane.showInputDialog(this, "Share to:", "Forward Post",
                 JOptionPane.PLAIN_MESSAGE, null, SHARE_PLATFORMS, SHARE_PLATFORMS[0]);
         if (choice == null) return;
-        new SwingWorker<Void, Void>() {
+        new SwingWorker<String, String>() {
             @Override
-            protected Void doInBackground() {
+            protected String doInBackground() {
                 try {
-                    ctx.api.sharePost(postId, choice);
-                } catch (ApiException | ApiOfflineException ignored) {
+                    JSONObject share = ctx.api.sharePost(postId, choice);
+                    return share.optString("shared_url", null);
+                } catch (ApiException e) {
+                    publish(e.getMessage());
+                } catch (ApiOfflineException e) {
+                    publish("You're offline — sharing needs a live connection.");
                 }
                 return null;
+            }
+
+            @Override
+            protected void process(List<String> chunks) {
+                if (!chunks.isEmpty()) {
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this, chunks.get(chunks.size() - 1),
+                            "Couldn't share", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String sharedUrl = get();
+                    if (sharedUrl != null) {
+                        openOnPlatform(choice, content, sharedUrl);
+                    } else {
+                        System.out.println("DEBUG: sharePost succeeded but shared_url was null/missing.");
+                    }
+                } catch (Exception e) {
+                    System.out.println("DEBUG: shareMenu failed:");
+                    e.printStackTrace();
+                }
             }
         }.execute();
     }
 
-    private void shareReplyMenu(long replyId) {
+    private void shareReplyMenu(long replyId, String content) {
         if (replyId < 0) return;
         String choice = (String) JOptionPane.showInputDialog(this, "Share to:", "Forward Reply",
                 JOptionPane.PLAIN_MESSAGE, null, SHARE_PLATFORMS, SHARE_PLATFORMS[0]);
         if (choice == null) return;
-        new SwingWorker<Void, Void>() {
+        new SwingWorker<String, String>() {
             @Override
-            protected Void doInBackground() {
+            protected String doInBackground() {
                 try {
-                    ctx.api.shareReply(replyId, choice);
-                } catch (ApiException | ApiOfflineException ignored) {
+                    JSONObject share = ctx.api.shareReply(replyId, choice);
+                    return share.optString("shared_url", null);
+                } catch (ApiException e) {
+                    publish(e.getMessage());
+                } catch (ApiOfflineException e) {
+                    publish("You're offline — sharing needs a live connection.");
                 }
                 return null;
             }
+
+            @Override
+            protected void process(List<String> chunks) {
+                if (!chunks.isEmpty()) {
+                    JOptionPane.showMessageDialog(TopicWorkspacePanel.this, chunks.get(chunks.size() - 1),
+                            "Couldn't share", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String sharedUrl = get();
+                    if (sharedUrl != null) {
+                        openOnPlatform(choice, content, sharedUrl);
+                    } else {
+                        System.out.println("DEBUG: shareReply succeeded but shared_url was null/missing.");
+                    }
+                } catch (Exception e) {
+                    System.out.println("DEBUG: shareReplyMenu failed:");
+                    e.printStackTrace();
+                }
+            }
         }.execute();
+    }
+
+    // Mirrors the web client's shareToPlatform(): builds the same style of
+    // message text and either opens the platform's share URL in the
+    // system's default browser, or copies to the clipboard for "Clipboard".
+    private void openOnPlatform(String platform, String content, String sharedUrl) {
+        String preview = content.length() > 100 ? content.substring(0, 100) + "..." : content;
+        String textToShare = "Check out this post on the Smart Discussion Forum:\n\"" + preview + "\"\nRead more here: " + sharedUrl;
+        String encodedText = URLEncoder.encode(textToShare, StandardCharsets.UTF_8);
+        String encodedUrl = URLEncoder.encode(sharedUrl, StandardCharsets.UTF_8);
+
+        try {
+            switch (platform) {
+                case "WhatsApp" -> Desktop.getDesktop().browse(new URI("https://api.whatsapp.com/send?text=" + encodedText));
+                case "Twitter" -> Desktop.getDesktop().browse(new URI("https://twitter.com/intent/tweet?text=" + encodedText));
+                case "Facebook" -> Desktop.getDesktop().browse(new URI("https://www.facebook.com/sharer/sharer.php?u=" + encodedUrl));
+                case "LinkedIn" -> Desktop.getDesktop().browse(new URI("https://www.linkedin.com/sharing/shareArticle?mini=true&url=" + encodedUrl
+                        + "&title=" + URLEncoder.encode("Forum Discussion", StandardCharsets.UTF_8) + "&summary=" + encodedText));
+                case "Clipboard" -> {
+                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(textToShare), null);
+                    JOptionPane.showMessageDialog(this, "Reference link & message copied to clipboard!", "Copied", JOptionPane.INFORMATION_MESSAGE);
+                }
+            }
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Couldn't open " + platform + ": " + e.getMessage(),
+                    "Sharing failed", JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     private void flagPost(long postId, boolean flagged) {
@@ -546,6 +631,7 @@ public class TopicWorkspacePanel extends JPanel {
             }
         }.execute();
     }
+
 
    private void flagReply(long replyId, boolean flagged) {
     if (replyId < 0) return;
