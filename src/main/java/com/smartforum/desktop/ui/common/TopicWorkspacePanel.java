@@ -361,6 +361,7 @@ public class TopicWorkspacePanel extends JPanel {
         JButton shareBtn = Buttons.link("Forward", Theme.ACCENT_DARK);
         shareBtn.addActionListener(e -> shareMenu(postId, post.optString("content", "")));
         JButton flagBtn = Buttons.link(isFlagged ? "Flagged" : "Flag", Theme.WARN);
+        flagBtn.addActionListener(e -> flagPost(postId, !isFlagged));
         JLabel time = new JLabel(post.optString("posted_at", ""));
         time.setFont(Theme.SMALL_FONT);
         time.setForeground(Theme.MUTED);

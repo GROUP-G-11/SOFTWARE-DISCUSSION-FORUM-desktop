@@ -132,6 +132,17 @@ public class ApiClient {
     public JSONObject joinGroup(long groupId) throws ApiException, ApiOfflineException {
         return postJson("/groups/" + groupId + "/join", new JSONObject().put("rules_accepted", true));
     }
+   public JSONArray groupJoinRequests(long groupId) throws ApiException, ApiOfflineException {
+        return getJsonArray("/groups/" + groupId + "/join-requests");
+    }
+
+    public JSONObject approveJoinRequest(long groupId, long requestId) throws ApiException, ApiOfflineException {
+        return postJson("/groups/" + groupId + "/join-requests/" + requestId + "/approve", new JSONObject());
+    }
+
+    public JSONObject declineJoinRequest(long groupId, long requestId) throws ApiException, ApiOfflineException {
+        return postJson("/groups/" + groupId + "/join-requests/" + requestId + "/decline", new JSONObject());
+    }
 
     public JSONObject groupMembers(long groupId) throws ApiException, ApiOfflineException {
         return getJson("/groups/" + groupId + "/members");
@@ -365,8 +376,8 @@ public class ApiClient {
         return getJson("/notifications");
     }
 
-    public int unreadNotificationCount() throws ApiException, ApiOfflineException {
-        return getJson("/notifications/unread-count").optInt("count", 0);
+   public int unreadNotificationCount() throws ApiException, ApiOfflineException {
+        return getJson("/notifications/unread-count").optInt("unread_count", 0);
     }
 
     public JSONObject markNotificationRead(long notificationId) throws ApiException, ApiOfflineException {
