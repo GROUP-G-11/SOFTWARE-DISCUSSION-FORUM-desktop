@@ -3,6 +3,7 @@ package com.smartforum.desktop.ui.common;
 import com.smartforum.desktop.AppContext;
 import com.smartforum.desktop.api.ApiException;
 import com.smartforum.desktop.api.ApiOfflineException;
+import org.json.JSONObject;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -13,6 +14,7 @@ public class CreateTopicDialog extends JDialog {
 
     private final JTextField titleField = new JTextField();
     private final JLabel errorLabel = new JLabel(" ");
+    private final JButton create = Buttons.primary("Create topic");
 
     public CreateTopicDialog(Window owner, AppContext ctx, long groupId, Consumer<Boolean> onDone) {
         super(owner, "Start a new topic", ModalityType.APPLICATION_MODAL);
@@ -59,7 +61,6 @@ public class CreateTopicDialog extends JDialog {
         JButton cancel = Buttons.secondary("Cancel");
         cancel.addActionListener(e -> dispose());
 
-        JButton create = Buttons.primary("Create topic");
         create.addActionListener(e -> submit(ctx, groupId, onDone));
 
         JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
@@ -74,21 +75,26 @@ public class CreateTopicDialog extends JDialog {
     }
 
     private void submit(AppContext ctx, long groupId, Consumer<Boolean> onDone) {
+        if (!create.isEnabled()) return; // already submitting - ignore a repeat click
         String title = titleField.getText().trim();
         if (title.isBlank()) {
             errorLabel.setText("Topic title is required.");
             return;
         }
+        String clientRef = java.util.UUID.randomUUID().toString();
 
+        create.setEnabled(false);
         new SwingWorker<Void, Void>() {
             String error = null;
 
             @Override
             protected Void doInBackground() {
                 try {
-                    ctx.api.createTopic(groupId, title);
+                    ctx.api.createTopic(groupId, title, clientRef);
                 } catch (ApiOfflineException e) {
-                    error = "Creating a new topic needs an internet connection. Please try again once you're back online.";
+                    JSONObject payload = new JSONObject().put("group_id", groupId).put("title", title).put("client_ref", clientRef);
+                    long outboxId = ctx.store.queueOutboxAction("create_topic", payload);
+                    ctx.store.cachePendingTopic(groupId, outboxId, payload, ctx.session.user());
                 } catch (ApiException e) {
                     error = e.getMessage();
                 }
@@ -97,9 +103,13 @@ public class CreateTopicDialog extends JDialog {
 
             @Override
             protected void done() {
+                create.setEnabled(true);
                 if (error != null) {
                     errorLabel.setText(error);
                 } else {
+                    // Both the real server response and the offline-queued
+                    // path leave a topic (real or pending) ready to show, so
+                    // both close the dialog and refresh the topic list.
                     dispose();
                     if (onDone != null) onDone.accept(true);
                 }

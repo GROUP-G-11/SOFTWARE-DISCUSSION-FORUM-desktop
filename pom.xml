@@ -87,6 +87,24 @@
                 <version>3.13.0</version>
             </plugin>
 
+            <plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-shade-plugin</artifactId>
+    <version>3.5.0</version>
+    <configuration>
+        <!-- Disable reduced POM creation or route it to target -->
+        <createDependencyReducedPom>false</createDependencyReducedPom>
+    </configuration>
+    <executions>
+        <execution>
+            <phase>package</phase>
+            <goals>
+                <goal>shade</goal>
+            </goals>
+        </execution>
+    </executions>
+</plugin>
+
             <!-- Produces a single runnable jar with all dependencies bundled,
                  so IntelliJ's "Run" or `java -jar target/....jar` just works
                  without the person having to wire up a classpath by hand. -->

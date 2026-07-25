@@ -1,5 +1,5 @@
 # Copy this file to config.properties (same folder) and edit as needed.
 # Both keys are optional - see README.md for defaults.
 
-api.baseUrl=http://127.0.0.1:8000/api
+api.baseUrl=https://software-discussion-forum-production.up.railway.app/api
 # db.file=/absolute/path/to/local-cache.sqlite
