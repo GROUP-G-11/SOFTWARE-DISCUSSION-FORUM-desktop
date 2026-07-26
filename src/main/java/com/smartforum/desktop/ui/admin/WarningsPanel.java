@@ -16,18 +16,6 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Matches dashboard/admin.blade.php #panel-warnings (loadWarningsAndFlags):
- * inactivity warnings AND flagged content (posts/replies flagged by
- * lecturers or student group admins) merged into one list, most recent
- * first, instead of only showing inactivity warnings.
- *
- * Previously this panel only called listWarnings(), so a flagged post or
- * reply never showed up here at all - the admin had no way to see it
- * outside the separate Notifications page. It now also pulls
- * listNotifications() and folds in any unread notification that looks
- * like a flag, exactly like the web client does.
- */
 public class WarningsPanel extends JPanel {
 
     private final AppContext ctx;
