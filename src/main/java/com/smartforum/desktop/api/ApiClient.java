@@ -17,17 +17,7 @@ import java.nio.file.Files;
 import java.time.Duration;
 import java.util.Map;
 
-/**
- * Thin REST wrapper around the Laravel backend (see routes/api.php on the
- * server for the source of truth this class mirrors). Every dashboard panel
- * goes through here rather than building HTTP requests itself, so the token
- * header, base URL, timeouts, and error handling live in exactly one place.
- *
- * Network failures are surfaced as {@link ApiOfflineException} specifically
- * (as opposed to {@link ApiException} for a real HTTP error response), so
- * calling code can tell "the server said no" apart from "there's no network
- * right now" and fall back to the local SQLite cache / outbox accordingly.
- */
+
 public class ApiClient {
 
     private final HttpClient http;
