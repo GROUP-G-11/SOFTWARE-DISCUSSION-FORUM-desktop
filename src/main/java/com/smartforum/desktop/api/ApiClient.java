@@ -132,7 +132,7 @@ public class ApiClient {
     public JSONObject joinGroup(long groupId) throws ApiException, ApiOfflineException {
         return postJson("/groups/" + groupId + "/join", new JSONObject().put("rules_accepted", true));
     }
-   public JSONArray groupJoinRequests(long groupId) throws ApiException, ApiOfflineException {
+    public JSONArray groupJoinRequests(long groupId) throws ApiException, ApiOfflineException {
         return getJsonArray("/groups/" + groupId + "/join-requests");
     }
 
@@ -356,8 +356,8 @@ public class ApiClient {
         return postJson("/quizzes/" + quizId + "/close", new JSONObject());
     }
 
-    public JSONObject quizResults(long quizId) throws ApiException, ApiOfflineException {
-        return getJson("/quizzes/" + quizId + "/results");
+    public JSONArray quizResults(long quizId) throws ApiException, ApiOfflineException {
+        return getJsonArray("/quizzes/" + quizId + "/results");
     }
 
     public JSONObject startAttempt(long quizId) throws ApiException, ApiOfflineException {
@@ -445,7 +445,7 @@ public class ApiClient {
         return getJson("/notifications");
     }
 
-   public int unreadNotificationCount() throws ApiException, ApiOfflineException {
+    public int unreadNotificationCount() throws ApiException, ApiOfflineException {
         return getJson("/notifications/unread-count").optInt("unread_count", 0);
     }
 

@@ -551,9 +551,9 @@ public class QuizListPanel extends JPanel {
     }
 
     private void showResults(long quizId, String title) {
-        new SwingWorker<JSONObject, Void>() {
+        new SwingWorker<JSONArray, Void>() {
             @Override
-            protected JSONObject doInBackground() {
+            protected JSONArray doInBackground() {
                 try {
                     return ctx.api.quizResults(quizId);
                 } catch (ApiException | ApiOfflineException e) {
@@ -563,17 +563,16 @@ public class QuizListPanel extends JPanel {
 
             @Override
             protected void done() {
-                JSONObject results;
+                JSONArray attempts;
                 try {
-                    results = get();
+                    attempts = get();
                 } catch (Exception e) {
-                    results = null;
+                    attempts = null;
                 }
-                if (results == null) {
+                if (attempts == null) {
                     JOptionPane.showMessageDialog(QuizListPanel.this, "Results need an internet connection.");
                     return;
                 }
-                JSONArray attempts = results.optJSONArray("data", results.optJSONArray("attempts", new JSONArray()));
                 String[] cols = {"Student", "Score", "Submitted"};
                 Object[][] rows = new Object[attempts.length()][3];
                 for (int i = 0; i < attempts.length(); i++) {
