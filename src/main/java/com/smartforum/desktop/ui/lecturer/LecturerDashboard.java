@@ -23,6 +23,7 @@ public class LecturerDashboard {
 
     public static DashboardChrome build(AppContext ctx, Runnable onLogout) {
         List<NavItem> navItems = List.of(
+                new NavItem("home", "\uD83C\uDFE0", "Home"),
                 new NavItem("groups", "\uD83D\uDC65", "Groups"),
                 new NavItem("quizzes", "\uD83D\uDCDD", "Quizzes"),
                 new NavItem("criteria", "\uD83D\uDCCA", "Scoring Criteria"),
@@ -55,6 +56,16 @@ public class LecturerDashboard {
         NotificationsPanel notificationsPanel = new NotificationsPanel(ctx);
         ProfilePanel profilePanel = new ProfilePanel(ctx);
 
+        HomePanel homePanel = new HomePanel(ctx, true, chrome::showPanel, List.of(
+                new HomePanel.QuickLink("\uD83D\uDC65", "Groups", "Manage groups & join requests", "groups"),
+                new HomePanel.QuickLink("\uD83D\uDCDD", "Quizzes", "Create and review quizzes", "quizzes"),
+                new HomePanel.QuickLink("\uD83D\uDCCA", "Scoring Criteria", "Set grading rules per group", "criteria")
+        ));
+        chrome.addPanel("home", homePanel);
+        chrome.onNavigateTo("home", homePanel::refresh);
+
+        
+
         chrome.addPanel("groups", groupsPanel);
         chrome.addPanel("topics", topicWorkspace);
         chrome.addPanel("group-statistics", statsPanel);
@@ -70,7 +81,7 @@ public class LecturerDashboard {
         chrome.onNavigateTo("notifications", notificationsPanel::refresh);
         chrome.onNavigateTo("profile", profilePanel::refresh);
 
-        chrome.showPanel("groups");
+        chrome.showPanel("home");
 
         pollUnreadNotifications(ctx, chrome);
 

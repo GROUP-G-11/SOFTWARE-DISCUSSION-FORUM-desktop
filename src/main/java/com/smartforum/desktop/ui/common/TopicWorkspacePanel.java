@@ -7,6 +7,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import javax.swing.*;
+import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.io.File;
@@ -142,47 +143,88 @@ public class TopicWorkspacePanel extends JPanel {
         for (int i = 0; i < topics.length(); i++) {
             JSONObject t = topics.getJSONObject(i);
             topicListBody.add(topicRow(t));
-            topicListBody.add(Box.createVerticalStrut(1));
+            topicListBody.add(Box.createVerticalStrut(15));
         }
         topicListBody.revalidate();
         topicListBody.repaint();
     }
 
     private JComponent topicRow(JSONObject topic) {
-        JPanel row = new JPanel(new BorderLayout());
-        row.setBorder(BorderFactory.createCompoundBorder(
+        CardPanel card = new CardPanel();
+card.setLayout(new BorderLayout(15,15));
+card.setBackground(Color.WHITE);
+card.setBorder(new CompoundBorder(
+        BorderFactory.createLineBorder(new Color(225,225,225),1,true),
+        new EmptyBorder(15,15,15,15)
+));
+        
+        card.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.LINE),
                 new EmptyBorder(12, 4, 12, 4)));
-        row.setBackground(Theme.WHITE);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
-        row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        card.setBackground(Theme.WHITE);
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
+        card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        
 
         JPanel left = new JPanel();
         left.setOpaque(false);
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
-        JLabel title = new JLabel(topic.optString("title", "Untitled topic"));
+       JLabel title = new JLabel("📘 " + topic.optString("title","Untitled Topic"));
+
+        JLabel author = new JLabel("👤 " + topic.optString("author_name","Unknown"));
+
+        author.setForeground(Color.GRAY);
+
+        JTextArea preview = new JTextArea(
+        topic.optString("description",""));
+
+         preview.setEditable(false);
+        preview.setOpaque(false);
+          preview.setLineWrap(true);
+          preview.setWrapStyleWord(true);
+
+left.add(preview);
+
+         title.setFont(new Font("Segoe UI", Font.BOLD,18));
+        title.setForeground(new Color(25,25,25));
         title.setFont(Theme.BODY_FONT_BOLD.deriveFont(14f));
-        JLabel meta = new JLabel(topic.optInt("posts_count", 0) + " replies" + (topic.has("category") && !topic.isNull("category") ? "  \u00b7  " + topic.optString("category") : ""));
-        meta.setFont(Theme.SMALL_FONT);
-        meta.setForeground(Color.GRAY);
+
+        JPanel bottom = new JPanel(  new FlowLayout(     FlowLayout.LEFT));
+bottom.setOpaque(false);
+
+bottom.add(new JLabel( "💬 " + topic.optInt("posts_count",0) + " Replies"));
+bottom.add(Box.createHorizontalStrut(20));
+
+bottom.add(new JLabel(  "📅 " + formatDateTime( topic.optString("created_at"))));
+left.add(bottom);
+
+        JButton open = Buttons.primary(  "Open Discussion");
+        open.addActionListener(e ->
+        openTopic( topic.getLong("topic_id"),
+                topic.optString("title")   ));
         left.add(title);
-        left.add(meta);
+        left.add(author);
 
-        row.add(left, BorderLayout.WEST);
+        card.add(left, BorderLayout.WEST);
 
-        row.addMouseListener(new java.awt.event.MouseAdapter() {
+        
+
+        card.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
                 openTopic(topic.getLong("topic_id"), topic.optString("title", "Topic"));
             }
         });
-        return row;
+        return card;
     }
 
     private void createTopic() {
         new CreateTopicDialog(SwingUtilities.getWindowAncestor(this), ctx, currentGroupId,
                 success -> refreshTopicList()).setVisible(true);
     }
+
+    
 
 
 
