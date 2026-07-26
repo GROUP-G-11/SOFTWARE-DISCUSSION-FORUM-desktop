@@ -13,12 +13,7 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Pill-shaped, fully-rounded buttons matching the web client's rounded
- * buttons. Every button here is a RoundedButton so the whole app - not
- * just one panel - reads as the same rounded "soft" UI as the Laravel
- * frontend, instead of flat rectangular Swing buttons.
- */
+
 public final class Buttons {
 
     private Buttons() {
@@ -59,13 +54,7 @@ public final class Buttons {
         return b;
     }
 
-    /**
-     * Stadium/pill-shaped button: fully rounded ends (arc = height, so the
-     * left/right edges are perfect semicircles like the web CSS buttons),
-     * an optional outline (used by "secondary" so it stays visible against
-     * a white/paper page background), and a hover tint so mouse-over gives
-     * real feedback instead of just a cursor change.
-     */
+    
     private static class RoundedButton extends JButton {
         private final Color base;
         private final Color hover;

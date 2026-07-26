@@ -9,12 +9,6 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 
-/**
- * Circular avatar: shows an uploaded photo when one is available (from a
- * remote URL, or a locally-chosen file awaiting upload), otherwise falls
- * back to initials on a solid accent background - mirrors the Laravel
- * web client's avatar treatment.
- */
 public class AvatarView extends JComponent {
 
     private final int diameter;
