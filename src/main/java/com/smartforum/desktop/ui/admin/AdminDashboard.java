@@ -25,9 +25,6 @@ public class AdminDashboard {
         GroupStatisticsPanel statsPanel = new GroupStatisticsPanel(ctx, () -> chrome.showPanel("groups"));
         GroupGradebookPanel gradebookPanel = new GroupGradebookPanel(ctx, () -> chrome.showPanel("groups"));
 
-        // Administrators never open a group's messages - GroupsPanel's
-        // ADMIN mode ignores this callback entirely (only Statistics/
-        // Gradebook pages are reachable), so a no-op is safe here.
         GroupsPanel groupsPanel = new GroupsPanel(ctx, GroupsPanel.Mode.ADMIN,
                 groupId -> {},
                 groupId -> {
