@@ -12,7 +12,7 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 
-/** Matches dashboard/admin.blade.php #panel-blacklists: active suspensions, with a Lift action. */
+
 public class BlacklistsPanel extends JPanel {
 
     private final AppContext ctx;
