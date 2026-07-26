@@ -5,19 +5,8 @@ import com.smartforum.desktop.ui.common.*;
 
 import java.util.List;
 
-/**
- * Nav items and order match the real Administration section in
- * layouts/app.blade.php exactly: System Overview, Groups, Inactivity
- * Warnings, Blacklisted Users, Manage Users, My Profile. Administrators do
- * not get a Notifications nav item (that's student/lecturer only), and
- * Groups deliberately has no click-through to messages - see GroupsPanel's
- * ADMIN mode.
- *
- * Statistics and Gradebook are full pages (their own CardLayout entries in
- * DashboardChrome) rather than popup dialogs - reached only by clicking the
- * Statistics/Gradebook button on a group row in the Groups page. They have
- * no sidebar nav item of their own, same as the lecturer dashboard.
- */
+
+
 public class AdminDashboard {
 
     public static DashboardChrome build(AppContext ctx, Runnable onLogout) {
