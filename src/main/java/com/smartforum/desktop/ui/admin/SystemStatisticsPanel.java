@@ -13,10 +13,7 @@ import javax.swing.border.LineBorder;
 import java.awt.*;
 import java.awt.geom.RoundRectangle2D;
 
-/**
- * Responsive System Overview panel where stat cards automatically wrap onto
- * new lines when width limits are reached, matching Laravel web grids.
- */
+
 public class SystemStatisticsPanel extends JPanel {
 
     private final AppContext ctx;
