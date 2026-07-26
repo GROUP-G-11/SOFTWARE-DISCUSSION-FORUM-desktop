@@ -107,14 +107,6 @@ public class WarningsPanel extends JPanel {
         }.execute();
     }
 
-    /**
-     * is_read can arrive as a real boolean, an integer (0/1), or a string
-     * ("0"/"1") depending on how the backend serialized the tinyint column -
-     * a plain `!n.optBoolean("is_read")` would silently treat a "0" string
-     * as read (org.json's optBoolean only recognizes actual Booleans or the
-     * literal strings "true"/"false", not "0"/"1") and every flag would
-     * disappear from this list. This normalizes every form the API can send.
-     */
     private boolean isUnreadFlag(JSONObject n) {
         Object raw = n.opt("is_read");
         boolean isRead = "true".equals(String.valueOf(raw)) || "1".equals(String.valueOf(raw)) || Boolean.TRUE.equals(raw);
